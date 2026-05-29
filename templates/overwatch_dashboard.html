@@ -47,6 +47,29 @@
             50% { opacity: 0.4; }
         }
         
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            border: 2px solid rgba(0, 180, 216, 0.3);
+            border-top-color: #00B4D8;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        .spinner-lg {
+            width: 2rem;
+            height: 2rem;
+            border-width: 3px;
+            border-color: rgba(0, 180, 216, 0.2);
+            border-top-color: #00B4D8;
+        }
+        
         .map-container {
             background: linear-gradient(45deg, #0f1f38, #1a2a4a);
             position: relative;
@@ -59,7 +82,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: 
+            background:
                 radial-gradient(circle at 30% 40%, rgba(0, 180, 216, 0.15) 0%, transparent 50%),
                 radial-gradient(circle at 70% 70%, rgba(255, 77, 77, 0.1) 0%, transparent 60%);
             pointer-events: none;
@@ -78,6 +101,30 @@
             color: #0A1428;
             border-color: #00B4D8;
         }
+
+        /* Search dropdown */
+        .search-results-dropdown {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Error state */
+        .error-msg {
+            color: #FF4D4D;
+            font-size: 11px;
+        }
+
+        /* Loading placeholder shimmer */
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        
+        .shimmer {
+            background: linear-gradient(90deg, #13213A 25%, #1a3055 50%, #13213A 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
     </style>
 </head>
 <body class="flex flex-col h-screen">
@@ -93,12 +140,14 @@
             </div>
             
             <!-- Global Search -->
-            <div class="relative w-96">
+            <div class="relative w-96" id="search-container">
                 <input id="global-search" 
                        type="text" 
                        placeholder="Search knowledge graph... (incident, tgid:5123, shots fired)"
                        class="w-full bg-[#0A1428] border border-cyan-500/30 focus:border-cyan-400 text-sm px-4 py-2.5 rounded-lg pl-10 text-white placeholder:text-slate-400 focus:outline-none">
                 <i class="fas fa-search absolute left-3.5 top-3 text-cyan-500"></i>
+                <!-- Search results dropdown -->
+                <div id="search-results" class="absolute top-full left-0 right-0 mt-1 bg-[#13213A] border border-cyan-500/30 rounded-lg shadow-xl z-50 hidden search-results-dropdown"></div>
             </div>
         </div>
         
@@ -106,7 +155,7 @@
             <!-- Live Status -->
             <div class="flex items-center gap-2 bg-[#13213A] px-4 py-1 rounded-full border border-emerald-500/30">
                 <div class="w-2 h-2 bg-emerald-400 rounded-full live-dot"></div>
-                <span class="text-xs font-medium text-emerald-400 mono">LIVE • 4 TGIDS ACTIVE</span>
+                <span class="text-xs font-medium text-emerald-400 mono" id="live-status-text">LIVE • CONNECTING...</span>
             </div>
             
             <!-- Mode Switcher -->
@@ -129,8 +178,8 @@
             </div>
             
             <div class="flex items-center gap-3 text-xs mono">
-                <div class="px-3 py-1 bg-amber-500/10 text-amber-400 rounded">3 INCIDENTS</div>
-                <div onclick="refreshKG()" class="cursor-pointer hover:text-cyan-400 transition-colors">
+                <div id="incident-count-badge" class="px-3 py-1 bg-amber-500/10 text-amber-400 rounded">-- INCIDENTS</div>
+                <div onclick="refreshAllData()" class="cursor-pointer hover:text-cyan-400 transition-colors" title="Refresh all data from KG">
                     <i class="fas fa-sync-alt"></i>
                 </div>
             </div>
@@ -145,13 +194,16 @@
                     <i class="fas fa-sitemap"></i>
                     <span>ONTOLOGY</span>
                 </div>
-                <div class="text-[10px] mono text-slate-500">KG • 127 nodes</div>
+                <div id="ontology-count" class="text-[10px] mono text-slate-500">KG • -- nodes</div>
             </div>
-            <div class="flex-1 overflow-auto p-3 text-sm ontology-tree" id="ontology-browser">
-                <!-- Populated by JS -->
+            <div class="flex-1 overflow-y-auto p-3 text-sm ontology-tree" id="ontology-browser">
+                <!-- Loading spinner shown initially -->
+                <div class="flex items-center justify-center h-full min-h-[200px]">
+                    <div class="spinner-lg spinner"></div>
+                </div>
             </div>
-            <div class="p-3 border-t border-slate-700 text-[10px] mono text-slate-500 bg-[#0A1428]">
-                14 Incidents • 87 Calls • 12 Talkgroups
+            <div id="ontology-footer" class="p-3 border-t border-slate-700 text-[10px] mono text-slate-500 bg-[#0A1428]">
+                Loading stats...
             </div>
         </div>
         
@@ -160,48 +212,38 @@
             <div class="flex-1 panel map-container relative" style="min-height: 420px;">
                 <div class="absolute top-4 left-4 bg-black/70 text-xs mono px-3 py-2 rounded border border-cyan-500/50 z-10">
                     <div class="flex items-center gap-2">
-                        <span class="text-cyan-400">•</span>
+                        <span class="text-cyan-400">&#x2022;</span>
                         <span>DALLAS METRO - LIVE FEED</span>
                     </div>
-                    <div class="text-slate-400 text-[10px] mt-1">32.8°N  96.8°W • 14:37:22Z</div>
+                    <div id="map-coords" class="text-slate-400 text-[10px] mt-1">32.8&#176;N  96.8&#176;W &#x2022; <span id="map-time">--:--:--Z</span></div>
                 </div>
                 
-                <!-- Fake map using CSS + Leaflet-like markers -->
+                <!-- Map placeholder -->
                 <div class="absolute inset-0 flex items-center justify-center text-slate-600 text-8xl font-light mono select-none">
                     MAP
                 </div>
                 <div class="map-overlay"></div>
                 
-                <!-- Sample incident markers -->
-                <div onclick="selectIncident(1)" class="absolute top-[35%] left-[42%] w-6 h-6 bg-red-500/80 hover:bg-red-500 rounded-full flex items-center justify-center cursor-pointer border border-white shadow-xl" title="Shooting - Downtown">
-                    <i class="fas fa-bullseye text-white text-xs"></i>
-                </div>
-                <div onclick="selectIncident(2)" class="absolute top-[55%] left-[65%] w-5 h-5 bg-amber-500/80 hover:bg-amber-500 rounded-full flex items-center justify-center cursor-pointer border border-white shadow-xl" title="Pursuit - I-35">
-                    <i class="fas fa-car text-white text-xs"></i>
-                </div>
+                <!-- Incident markers (populated dynamically) -->
+                <div id="map-markers"></div>
                 
-                <div class="absolute bottom-4 right-4 bg-black/80 text-[10px] mono p-3 rounded border border-slate-600 leading-none">
-                    <div class="text-emerald-400">4 UNITS DEPLOYED</div>
-                    <div class="text-slate-400">TG 5123 • 5141</div>
+                <div id="units-deployed" class="absolute bottom-4 right-4 bg-black/80 text-[10px] mono p-3 rounded border border-slate-600 leading-none">
+                    <div class="text-emerald-400">-- UNITS DEPLOYED</div>
+                    <div class="text-slate-400">Loading talkgroups...</div>
                 </div>
             </div>
             
             <!-- Bottom Timeline -->
             <div class="h-28 panel flex flex-col">
                 <div class="px-4 py-2 border-b border-slate-600 flex items-center justify-between text-xs mono">
-                    <div>TIMELINE • LAST 45 MINUTES</div>
-                    <div class="flex gap-4 text-slate-400">
-                        <span class="text-cyan-400">14:12</span>
-                        <span class="text-cyan-400">14:22</span>
-                        <span class="text-cyan-400">14:29 INCIDENT</span>
-                        <span class="text-rose-400">14:37 LIVE</span>
+                    <div>TIMELINE &#x2022; INCIDENT CHRONOLOGY</div>
+                    <div id="timeline-labels" class="flex gap-4 text-slate-400">
+                        <span class="text-slate-500">Waiting for data...</span>
                     </div>
                 </div>
                 <div class="flex-1 relative flex items-center px-6 timeline">
-                    <div class="h-2 bg-cyan-400 w-full rounded-full relative">
-                        <!-- Timeline markers -->
-                        <div class="absolute left-1/4 w-3 h-3 -top-0.5 bg-white rounded-full shadow"></div>
-                        <div class="absolute left-2/3 w-3 h-3 -top-0.5 bg-red-500 rounded-full shadow ring-2 ring-red-400"></div>
+                    <div id="timeline-bar" class="h-2 bg-cyan-400/30 w-full rounded-full relative">
+                        <!-- Timeline markers populated by JS -->
                     </div>
                 </div>
             </div>
@@ -209,17 +251,20 @@
         
         <!-- RIGHT: Live Transcript + Incidents -->
         <div class="w-80 flex flex-col gap-4">
-            <!-- Live Transcript -->
+            <!-- Live Transcript (shows calls/transcripts from incidents) -->
             <div class="flex-1 panel flex flex-col">
                 <div class="px-4 py-3 border-b border-cyan-500/30 bg-[#0f1f38] flex items-center justify-between text-xs">
                     <div class="flex items-center gap-2">
                         <i class="fas fa-waveform-lines text-cyan-400"></i>
                         <span class="font-semibold text-cyan-300">LIVE TRANSCRIPT</span>
                     </div>
-                    <div class="px-2 py-0.5 bg-cyan-900 text-cyan-300 text-[10px] rounded mono">TG: 5123</div>
+                    <div id="transcript-tg-badge" class="px-2 py-0.5 bg-cyan-900 text-cyan-300 text-[10px] rounded mono">ALL CHANNELS</div>
                 </div>
-                <div id="transcript-feed" class="flex-1 p-4 text-sm overflow-auto space-y-5 mono text-slate-300 text-[13px] leading-tight">
-                    <!-- JS populated -->
+                <div id="transcript-feed" class="flex-1 p-4 text-sm overflow-y-auto space-y-5 mono text-slate-300 text-[13px] leading-tight">
+                    <!-- Loading state -->
+                    <div class="flex items-center justify-center h-full min-h-[150px]">
+                        <div><span class="spinner mr-2"></span> Loading transcript data...</div>
+                    </div>
                 </div>
             </div>
             
@@ -227,110 +272,504 @@
             <div class="h-64 panel flex flex-col">
                 <div class="px-4 py-3 border-b border-rose-500/30 text-xs font-medium flex items-center gap-2 text-rose-400">
                     <i class="fas fa-exclamation-triangle"></i>
-                    ACTIVE INCIDENTS (2)
+                    <span id="incident-panel-header">ACTIVE INCIDENTS (--)</span>
                 </div>
-                <div class="flex-1 p-3 space-y-3 overflow-auto" id="incident-panel">
-                    <!-- JS populated -->
+                <div class="flex-1 p-3 space-y-3 overflow-y-auto" id="incident-panel">
+                    <!-- Loading state -->
+                    <div class="flex items-center justify-center h-full min-h-[120px]">
+                        <div><span class="spinner mr-2"></span>Loading incidents...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Relationships Panel (collapsed by default, expandable) -->
+            <div class="panel flex flex-col" id="relationships-panel" style="display:none;">
+                <div class="px-4 py-3 border-b border-purple-500/30 text-xs font-medium flex items-center gap-2 text-purple-400 cursor-pointer" onclick="toggleRelationships()">
+                    <i class="fas fa-project-diagram"></i>
+                    <span>RELATIONSHIPS (<span id="rel-count">--</span>)</span>
+                    <i class="fas fa-chevron-down ml-auto transition-transform" id="rel-toggle-icon"></i>
+                </div>
+                <div id="relationship-list" class="flex-1 p-3 space-y-2 overflow-y-auto text-xs max-h-48">
+                    <!-- Populated by JS -->
                 </div>
             </div>
         </div>
     </div>
     
     <div class="h-9 bg-[#0A1428] border-t border-cyan-900 flex items-center px-6 text-[10px] mono text-slate-500 justify-between">
-        <div>CONNECTED TO BATTLE_KNOWLEDGE.DB • 127 ENTITIES LOADED</div>
+        <div id="footer-status">CONNECTING TO KNOWLEDGE GRAPH...</div>
         <div class="flex items-center gap-5">
             <span onclick="exportKG()" class="cursor-pointer hover:text-cyan-400">EXPORT KG</span>
-            <span class="text-emerald-400">• MODE: OVERWATCH •</span>
+            <span class="text-emerald-400">&#x2022; MODE: OVERWATCH &#x2022;</span>
             <span id="clock" class="mono"></span>
         </div>
     </div>
     
     <script>
-        // Sample data from our KG (hardcoded for the skeleton)
-        const sampleKG = {
-            incidents: [
-                {
-                    id: 1,
-                    type: "Shooting",
-                    description: "Shots fired near downtown. Possible suspect fleeing northbound.",
-                    time: "14:29",
-                    confidence: 0.92,
-                    location: "Downtown Sector",
-                    linked: ["tgid:5123", "call:4871"]
-                },
-                {
-                    id: 2,
-                    type: "Pursuit",
-                    description: "Vehicle pursuit in progress. Black sedan, partial plate K4R.",
-                    time: "14:35",
-                    confidence: 0.78,
-                    location: "I-35 North",
-                    linked: ["tgid:5142"]
+        // =====================================================================
+        // Battle Buddy Overwatch Dashboard — Live API-Wired Version
+        // All data fetched from /api/kg/* endpoints. No hardcoded sample data.
+        // =====================================================================
+
+        // ---- In-memory caches for dashboard state ----
+        let cachedStats = null;
+        let cachedNodes = null;
+        let cachedIncidents = null;
+        let cachedRelationships = null;
+
+        // ---- Utility: safe fetch wrapper with error handling ----
+        async function apiFetch(url, errorMsg) {
+            try {
+                const resp = await fetch(url);
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.error || `HTTP ${resp.status}`);
                 }
-            ],
-            transcripts: [
-                {time: "14:37:11", tgid: "5123", text: "Shots fired, I have one down. Requesting backup at Main and 5th.", confidence: "HIGH"},
-                {time: "14:37:22", tgid: "5123", text: " suspect last seen heading west on Elm. Possible 10-33.", confidence: "MED"},
-                {time: "14:37:45", tgid: "5141", text: "Copy that APD. Fire is enroute.", confidence: "LOW"}
-            ],
-            ontologyNodes: [
-                {id: "incident:1", label: "Incident", name: "Downtown Shooting", children: 3},
-                {id: "tg:5123", label: "Talkgroup", name: "APD Dispatch 1", children: 12},
-                {id: "pattern:shots", label: "Pattern", name: "Shots Fired", children: 5}
-            ]
-        };
-        
-        function populateOntology() {
-            const container = document.getElementById("ontology-browser");
-            let html = `<ul class="space-y-2 text-xs">`;
-            sampleKG.ontologyNodes.forEach(node => {
-                html += `
-                    <li onclick="inspectNode('${node.id}')" class="flex items-center gap-2 hover:bg-slate-800 p-2 rounded cursor-pointer border-l-2 border-cyan-500">
-                        <span class="text-cyan-400 mono w-16">${node.label}</span>
-                        <span class="flex-1">${node.name}</span>
-                        <span class="text-slate-500 mono">+${node.children}</span>
-                    </li>`;
+                return await resp.json();
+            } catch (err) {
+                console.error(`[KG API] ${errorMsg}:`, err);
+                return { error: err.message };
+            }
+        }
+
+        // ---- Utility: show loading spinner in a container ----
+        function showLoading(containerId, message = 'Loading...') {
+            const el = document.getElementById(containerId);
+            if (el) {
+                el.innerHTML = `<div class="flex items-center justify-center h-full min-h-[100px]"><div><span class="spinner mr-2"></span>${message}</div></div>`;
+            }
+        }
+
+        // ---- Utility: show error in a container ----
+        function showError(containerId, message) {
+            const el = document.getElementById(containerId);
+            if (el) {
+                el.innerHTML = `<div class="error-msg p-4 text-center"><i class="fas fa-exclamation-circle mr-1"></i>${escapeHtml(message)}<br><button onclick="refreshAllData()" class="mt-2 text-cyan-400 hover:underline cursor-pointer">Retry</button></div>`;
+            }
+        }
+
+        // ---- Utility: HTML escape for safety ----
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.appendChild(document.createTextNode(String(text)));
+            return div.innerHTML;
+        }
+
+        // =====================================================================
+        // API CALLERS
+        // =====================================================================
+
+        async function fetchStats() {
+            const data = await apiFetch('/api/kg/stats', 'Failed to load stats');
+            if (data && !data.error) {
+                cachedStats = data;
+                renderStats(data);
+            } else {
+                document.getElementById('live-status-text').textContent = 'LIVE &#x2022; ERROR';
+                document.getElementById('footer-status').textContent = 'ERROR CONNECTING TO KG API';
+            }
+        }
+
+        async function fetchNodes() {
+            const data = await apiFetch('/api/kg/nodes', 'Failed to load nodes');
+            if (data && !data.error) {
+                cachedNodes = data.nodes;
+                renderOntology(data.nodes, data.count);
+            } else {
+                showError('ontology-browser', data?.error || 'Failed to load knowledge graph nodes.');
+            }
+        }
+
+        async function fetchIncidents() {
+            const data = await apiFetch('/api/kg/incidents', 'Failed to load incidents');
+            if (data && !data.error) {
+                cachedIncidents = data.incidents;
+                renderIncidents(data.incidents, data.count);
+                renderTranscriptFromIncidents(data.incidents);
+                renderTimelineFromIncidents(data.incidents);
+                renderMapMarkers(data.incidents);
+            } else {
+                showError('incident-panel', data?.error || 'Failed to load incidents.');
+                showError('transcript-feed', data?.error || 'Failed to load transcript data.');
+            }
+        }
+
+        async function fetchRelationships() {
+            const data = await apiFetch('/api/kg/relationships', 'Failed to load relationships');
+            if (data && !data.error) {
+                cachedRelationships = data.relationships;
+                renderRelationships(data.relationships, data.count);
+            }
+        }
+
+        async function searchKG(query) {
+            if (!query || query.trim().length === 0) {
+                hideSearchResults();
+                return;
+            }
+            const data = await apiFetch(`/api/kg/search?q=${encodeURIComponent(query.trim())}`, 'Search failed');
+            if (data && !data.error) {
+                renderSearchResults(data.results, data.query);
+            } else {
+                renderSearchResults([], query, data?.error || 'Search error');
+            }
+        }
+
+        // =====================================================================
+        // RENDERERS
+        // =====================================================================
+
+        function renderStats(stats) {
+            // Header: live status + incident count
+            const tgCount = (stats.nodes_by_type['Talkgroup'] || 0) + (stats.nodes_by_type['talkgroup'] || 0);
+            document.getElementById('live-status-text').textContent = `LIVE \u2022 ${tgCount} TGIDS ACTIVE`;
+            
+            const incCount = (stats.nodes_by_type['Incident'] || 0) + (stats.nodes_by_type['incident'] || 0);
+            document.getElementById('incident-count-badge').textContent = `${incCount} INCIDENT${incCount !== 1 ? 'S' : ''}`;
+            
+            // Ontology header count
+            document.getElementById('ontology-count').textContent = `KG \u2022 ${stats.node_count} nodes`;
+            
+            // Footer status
+            document.getElementById('footer-status').textContent =
+                `CONNECTED TO KG \u2022 ${stats.node_count} ENTITIES \u2022 ${stats.edge_count} RELATIONS`;
+            
+            // Units deployed area on map
+            document.getElementById('units-deployed').innerHTML = `
+                <div class="text-emerald-400">${tgCount} TGIDS ACTIVE</div>
+                <div class="text-slate-400">${stats.node_count} nodes \u2022 ${stats.edge_count} edges</div>
+            `;
+            
+            // Ontology footer summary
+            const typeEntries = Object.entries(stats.nodes_by_type);
+            const footerParts = typeEntries.map(([k, v]) => `${v} ${k}s`).join(' \u2022 ');
+            document.getElementById('ontology-footer').textContent = footerParts || `${stats.node_count} total entities`;
+
+            // Update map timestamp
+            const now = new Date();
+            document.getElementById('map-time').textContent = now.toISOString().substr(11, 8) + 'Z';
+        }
+
+        function renderOntology(nodes, totalCount) {
+            const container = document.getElementById('ontology-browser');
+            
+            if (!nodes || nodes.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-xs text-center p-4">No nodes found in knowledge graph.</div>';
+                return;
+            }
+
+            // Group nodes by label/type for tree view
+            const grouped = {};
+            nodes.forEach(node => {
+                const label = node.label || node.type || 'Unknown';
+                if (!grouped[label]) grouped[label] = [];
+                grouped[label].push(node);
             });
-            html += `</ul>`;
+
+            let html = '<ul class="space-y-1 text-xs">';
+            
+            Object.entries(grouped).forEach(([label, nodeList]) => {
+                html += `
+                    <li class="mb-2">
+                        <div class="flex items-center gap-2 p-1.5 bg-[#0a1628] rounded text-cyan-400 font-semibold cursor-pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+                            <i class="fas fa-folder text-[10px]"></i>
+                            <span>${escapeHtml(label)}</span>
+                            <span class="ml-auto text-slate-500 mono text-[10px]">${nodeList.length}</span>
+                            <i class="fas fa-chevron-down text-[8px] text-slate-600"></i>
+                        </div>
+                        <ul class="pl-3 space-y-0.5 mt-1" style="display:block;">`;
+                
+                nodeList.forEach(node => {
+                    const displayName = node.name || node.id || 'Unnamed';
+                    const desc = node.description ? ` title="${escapeHtml(node.description)}"` : '';
+                    html += `
+                        <li onclick="inspectNode('${escapeHtml(node.id)}')" 
+                            class="flex items-center gap-2 hover:bg-slate-800 p-1.5 rounded cursor-pointer border-l-2 border-cyan-500/40"${desc}>
+                            <span class="text-slate-400 w-20 truncate">${escapeHtml(displayName.substring(0, 18))}</span>
+                            <span class="text-slate-600 mono text-[10px] truncate flex-1">${escapeHtml(String(node.id).substring(0, 24))}</span>
+                        </li>`;
+                });
+                
+                html += '</ul></li>';
+            });
+            
+            html += '</ul>';
             container.innerHTML = html;
         }
-        
-        function populateTranscripts() {
-            const container = document.getElementById("transcript-feed");
+
+        function renderIncidents(incidents, count) {
+            const container = document.getElementById('incident-panel');
+            const headerEl = document.getElementById('incident-panel-header');
+            
+            headerEl.textContent = `ACTIVE INCIDENTS (${count})`;
+            
+            if (!incidents || incidents.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-xs text-center p-4">No active incidents.</div>';
+                return;
+            }
+
             let html = '';
-            sampleKG.transcripts.forEach(t => {
+            incidents.forEach((inc, idx) => {
+                const itype = inc.itype || inc.type || inc.label || 'Incident';
+                const desc = inc.description || inc.name || 'No description available.';
+                const timeStr = inc.timestamp || inc.time || inc.created_at || '--:--';
+                const location = inc.location || 'Unknown';
+                const confidence = inc.confidence !== undefined ? inc.confidence : (inc.score || 0);
+                const relatedCalls = inc.related_calls || [];
+                const agencies = inc.agencies || [];
+                
                 html += `
-                <div class="border-l-2 border-cyan-400 pl-3">
-                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
-                        <span>${t.time} <span class="text-cyan-400">TG${t.tgid}</span></span>
-                        <span class="text-emerald-400">${t.confidence}</span>
-                    </div>
-                    <div class="text-slate-200">${t.text}</div>
-                </div>`;
-            });
-            container.innerHTML = html;
-        }
-        
-        function populateIncidents() {
-            const container = document.getElementById("incident-panel");
-            let html = '';
-            sampleKG.incidents.forEach(inc => {
-                html += `
-                <div onclick="selectIncident(${inc.id})" class="bg-[#0f1f38] hover:bg-[#1a2a45] p-3 rounded border border-red-500/30 cursor-pointer">
+                <div onclick="selectIncident('${escapeHtml(inc.id)}')" 
+                     class="bg-[#0f1f38] hover:bg-[#1a2a45] p-3 rounded border border-red-500/30 cursor-pointer transition-colors">
                     <div class="flex justify-between text-xs">
-                        <div class="font-semibold text-red-300">${inc.type}</div>
-                        <div class="mono text-slate-400">${inc.time}</div>
+                        <div class="font-semibold text-red-300">${escapeHtml(itype)}</div>
+                        <div class="mono text-slate-400">${escapeHtml(typeof timeStr === 'string' ? timeStr.substring(0, 12) : timeStr)}</div>
                     </div>
-                    <div class="text-sm leading-tight mt-1.5 text-slate-200 line-clamp-2">${inc.description}</div>
-                    <div class="text-[10px] text-cyan-400 mt-2 flex gap-2">
-                        <span class="bg-cyan-900/60 px-2 py-px rounded">${inc.location}</span>
-                        <span class="mono">${(inc.confidence*100).toFixed(0)}%</span>
+                    <div class="text-sm leading-tight mt-1.5 text-slate-200 line-clamp-2">${escapeHtml(desc)}</div>
+                    <div class="text-[10px] text-cyan-400 mt-2 flex gap-2 flex-wrap">
+                        <span class="bg-cyan-900/60 px-2 py-px rounded">${escapeHtml(location)}</span>
+                        ${confidence > 0 ? `<span class="mono">${Math.round(confidence * 100)}%</span>` : ''}
+                        ${relatedCalls.length > 0 ? `<span class="bg-purple-900/60 px-2 py-px rounded">${relatedCalls.length} call${relatedCalls.length !== 1 ? 's' : ''}</span>` : ''}
+                        ${agencies.length > 0 ? `<span class="bg-emerald-900/60 px-2 py-px rounded">${agencies.length} agency${agencies.length !== 1 ? 'ies' : 'y'}</span>` : ''}
                     </div>
                 </div>`;
             });
             container.innerHTML = html;
         }
-        
+
+        function renderTranscriptFromIncidents(incidents) {
+            const container = document.getElementById('transcript-feed');
+            
+            if (!incidents || incidents.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-xs text-center p-4">No transcript data available.</div>';
+                return;
+            }
+
+            let html = '';
+            let entryCount = 0;
+            
+            // Extract related_calls from each incident as "transcript" entries
+            incidents.forEach(inc => {
+                const calls = inc.related_calls || [];
+                calls.forEach(call => {
+                    const callTime = call.timestamp || call.time || call.created_at || '--:--';
+                    const tgId = call.tgid || call.talkgroup || call.label || '??';
+                    const callText = call.text || call.transcript || call.description || call.name || '(no transcript)';
+                    const conf = call.confidence || call.score || 'MED';
+                    
+                    html += `
+                    <div class="border-l-2 border-cyan-400 pl-3">
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                            <span>${escapeHtml(String(callTime).substring(0, 12))} <span class="text-cyan-400">TG${escapeHtml(String(tgId))}</span></span>
+                            <span class="${typeof conf === 'number' && conf >= 0.7 ? 'text-emerald-400' : typeof conf === 'string' && conf === 'HIGH' ? 'text-emerald-400' : 'text-amber-400'}">${escapeHtml(String(conf))}</span>
+                        </div>
+                        <div class="text-slate-200">${escapeHtml(String(callText))}</div>
+                    </div>`;
+                    entryCount++;
+                });
+
+                // If no calls, show incident itself as an entry
+                if (calls.length === 0) {
+                    const incTime = inc.timestamp || inc.time || inc.created_at || '--:--';
+                    html += `
+                    <div class="border-l-2 border-rose-400 pl-3">
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                            <span>${escapeHtml(String(incTime).substring(0, 12))} <span class="text-rose-400">INCIDENT</span></span>
+                            <span class="text-red-400">ALERT</span>
+                        </div>
+                        <div class="text-slate-200">${escapeHtml(inc.description || inc.name || 'No details')}</div>
+                    </div>`;
+                    entryCount++;
+                }
+            });
+            
+            if (entryCount === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-xs text-center p-4">No call transcripts linked to incidents.</div>';
+            } else {
+                container.innerHTML = html;
+            }
+        }
+
+        function renderTimelineFromIncidents(incidents) {
+            const labelsContainer = document.getElementById('timeline-labels');
+            const barContainer = document.getElementById('timeline-bar');
+            
+            if (!incidents || incidents.length === 0) {
+                labelsContainer.innerHTML = '<span class="text-slate-500">No incidents to display.</span>';
+                barContainer.innerHTML = '';
+                return;
+            }
+
+            // Sort incidents by time
+            const sorted = [...incidents].sort((a, b) => {
+                const ta = a.timestamp || a.time || a.created_at || '';
+                const tb = b.timestamp || b.time || b.created_at || '';
+                return String(ta).localeCompare(String(tb));
+            });
+
+            // Timeline labels (show first few timestamps)
+            const labels = sorted.slice(0, 5).map(inc => {
+                const t = inc.timestamp || inc.time || inc.created_at || '--:--';
+                const shortT = String(t).substring(0, 8);
+                const isAlert = (inc.itype || '').toLowerCase().includes('shoot') || 
+                                (inc.type || '').toLowerCase().includes('shoot') ||
+                                (inc.confidence || 0) > 0.85;
+                return `<span class="${isAlert ? 'text-rose-400' : 'text-cyan-400'}">${shortT} ${isAlert ? 'INCIDENT' : ''}</span>`;
+            }).join('');
+            
+            labelsContainer.innerHTML = labels + (sorted.length > 5 ? `<span class="text-slate-500">+${sorted.length - 5} more</span>` : '');
+
+            // Timeline markers
+            let markers = '';
+            sorted.forEach((inc, idx) => {
+                const leftPos = Math.min(5 + (idx / sorted.length) * 90, 95);
+                const isHighConf = (inc.confidence || 0) > 0.85;
+                markers += `<div onclick="selectIncident('${escapeHtml(inc.id)}')" 
+                    class="absolute w-3 h-3 -top-0.5 ${isHighConf ? 'bg-red-500 ring-2 ring-red-400' : 'bg-white'} rounded-full shadow cursor-pointer hover:scale-150 transition-transform"
+                    style="left:${leftPos}%"
+                    title="${escapeHtml(inc.itype || inc.type || 'Incident')}"></div>`;
+            });
+            barContainer.innerHTML = markers;
+        }
+
+        function renderMapMarkers(incidents) {
+            const container = document.getElementById('map-markers');
+            
+            if (!incidents || incidents.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            // Position markers pseudo-randomly but deterministically based on index
+            const positions = [
+                {top: '35%', left: '42%'},
+                {top: '55%', left: '65%'},
+                {top: '25%', left: '30%'},
+                {top: '65%', left: '45%'},
+                {top: '45%', left: '75%'},
+                {top: '30%', left: '55%'},
+            ];
+
+            let html = '';
+            incidents.slice(0, 6).forEach((inc, idx) => {
+                const pos = positions[idx % positions.length];
+                const itype = (inc.itype || inc.type || inc.label || '').toLowerCase();
+                let iconClass = 'fa-bullseye';
+                let colorClass = 'bg-red-500/80 hover:bg-red-500';
+                
+                if (itype.includes('pursuit') || itype.includes('vehicle') || itype.includes('car')) {
+                    iconClass = 'fa-car';
+                    colorClass = 'bg-amber-500/80 hover:bg-amber-500';
+                } else if (itype.includes('fire')) {
+                    iconClass = 'fa-fire';
+                    colorClass = 'bg-orange-500/80 hover:bg-orange-500';
+                } else if (itype.includes('medical') || itype.includes('injury')) {
+                    iconClass = 'fa-plus';
+                    colorClass = 'bg-pink-500/80 hover:bg-pink-500';
+                }
+
+                html += `
+                <div onclick="selectIncident('${escapeHtml(inc.id)}')" 
+                     class="absolute ${colorClass} w-6 h-6 rounded-full flex items-center justify-center cursor-pointer border border-white shadow-xl transition-transform hover:scale-125"
+                     style="top:${pos.top}; left:${pos.left};"
+                     title="${escapeHtml(inc.itype || inc.type || 'Incident')} - ${escapeHtml(inc.location || '')}">
+                    <i class="fas ${iconClass} text-white text-xs"></i>
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function renderRelationships(relationships, count) {
+            document.getElementById('rel-count').textContent = count || '0';
+            
+            // Show the panel if we have relationships
+            if (count > 0) {
+                document.getElementById('relationships-panel').style.display = 'flex';
+            }
+            
+            const container = document.getElementById('relationship-list');
+            
+            if (!relationships || relationships.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-[10px] text-center p-2">No relationships found.</div>';
+                return;
+            }
+
+            // Show a subset (max 15) in the compact view
+            const displayRels = relationships.slice(0, 15);
+            let html = '';
+            
+            displayRels.forEach(rel => {
+                const relType = rel.type || 'LINK';
+                const srcShort = String(rel.source || '').substring(0, 16);
+                const tgtShort = String(rel.target || '').substring(0, 16);
+                
+                html += `
+                <div class="flex items-center gap-2 text-[10px] p-1.5 rounded bg-[#0a1628] hover:bg-[#152238] cursor-default"
+                     title="${escapeHtml(relType)}: ${escapeHtml(rel.source)} \u2192 ${escapeHtml(rel.target)}">
+                    <span class="text-purple-400 font-mono shrink-0">${escapeHtml(relType)}</span>
+                    <span class="text-slate-400 truncate">${escapeHtml(srcShort)}</span>
+                    <i class="fas fa-arrow-right text-slate-600 text-[8px]"></i>
+                    <span class="text-slate-300 truncate">${escapeHtml(tgtShort)}</span>
+                </div>`;
+            });
+            
+            if (relationships.length > 15) {
+                html += `<div class="text-[10px] text-slate-500 text-center pt-1">+${relationships.length - 15} more relationships...</div>`;
+            }
+            
+            container.innerHTML = html;
+        }
+
+        function renderSearchResults(results, query, error = null) {
+            const dropdown = document.getElementById('search-results');
+            
+            if (error) {
+                dropdown.innerHTML = `<div class="p-3 error-msg text-xs"><i class="fas fa-exclamation-circle mr-1"></i>${escapeHtml(error)}</div>`;
+                dropdown.classList.remove('hidden');
+                return;
+            }
+            
+            if (!results || results.length === 0) {
+                dropdown.innerHTML = `<div class="p-3 text-slate-400 text-xs">No results for "${escapeHtml(query)}"</div>`;
+                dropdown.classList.remove('hidden');
+                return;
+            }
+
+            let html = `<div class="px-3 py-2 text-[10px] text-slate-500 border-b border-slate-700">${results.length} result(s) for "<span class="text-cyan-400">${escapeHtml(query)}"</span></div>`;
+            
+            results.slice(0, 10).forEach(r => {
+                const label = r.label || r.type || 'Entity';
+                const name = r.name || r.id || 'Unnamed';
+                const desc = r.description ? escapeHtml(r.description.substring(0, 80)) : '';
+                
+                html += `
+                <div onclick="inspectNode('${escapeHtml(r.id)}'); hideSearchResults();" 
+                     class="px-3 py-2 hover:bg-[#1a3055] cursor-pointer border-b border-slate-800/50 last:border-0">
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="text-cyan-400 font-mono text-[10px] bg-cyan-900/40 px-1.5 rounded">${escapeHtml(label)}</span>
+                        <span class="text-slate-200 font-medium">${escapeHtml(name.substring(0, 28))}</span>
+                    </div>
+                    ${desc ? `<div class="text-slate-500 text-[10px] mt-0.5 ml-14 truncate">${desc}</div>` : ''}
+                </div>`;
+            });
+            
+            if (results.length > 10) {
+                html += `<div class="px-3 py-1.5 text-[10px] text-slate-500 text-center">+${results.length - 10} more results</div>`;
+            }
+            
+            dropdown.innerHTML = html;
+            dropdown.classList.remove('hidden');
+        }
+
+        function hideSearchResults() {
+            document.getElementById('search-results').classList.add('hidden');
+        }
+
+        // =====================================================================
+        // UI INTERACTION HANDLERS
+        // =====================================================================
+
         function switchMode(mode) {
             document.querySelectorAll('.mode-btn').forEach((btn, i) => {
                 if (i === mode) {
@@ -343,36 +782,69 @@
             const mapEl = document.querySelector('.map-container');
             if (mode === 2) {
                 mapEl.style.opacity = '0.6';
-                alert("Timeline view activated — all panels now synchronized to time scrubber (demo)");
             } else if (mode === 1) {
                 mapEl.style.opacity = '1';
             }
         }
-        
+
         function selectIncident(id) {
-            const inc = sampleKG.incidents.find(i => i.id === id);
+            // Find the incident in our cache or make API call
+            const inc = cachedIncidents ? cachedIncidents.find(i => i.id === id) : null;
             if (inc) {
-                alert(`Incident selected: ${inc.type}\\n\\n${inc.description}\\n\\nLinked KG entities: ${inc.linked.join(', ')}\\n\\nOpening full ontology view...`);
+                const itype = inc.itype || inc.type || inc.label || 'Incident';
+                const desc = inc.description || inc.name || '';
+                const calls = (inc.related_calls || []).map(c => c.id || c.name || c).join(', ');
+                const agencies = (inc.agencies || []).map(a => a.name || a.id || a).join(', ');
+                
+                alert(`Incident: ${itype}\n\n${desc}\n\nLinked calls: ${calls || 'none'}\nAgencies: ${agencies || 'none'}\nID: ${id}`);
+            } else {
+                alert(`Incident ID: ${id}\n\nDetails would be loaded from the knowledge graph.`);
             }
         }
-        
+
         function inspectNode(id) {
-            alert(`KG Node: ${id}\\n\\nThis would trigger full graph expansion in production (D3.js + vis-network). Sample data from battle_knowledge.db loaded successfully.`);
+            // Try to find node in cache
+            const node = cachedNodes ? cachedNodes.find(n => n.id === id) : null;
+            if (node) {
+                alert(`KG Node\n\nID: ${node.id}\nLabel: ${node.label || '-'}\nName: ${node.name || '-'}\nType: ${node.type || '-'}\nDescription: ${(node.description || '-').substring(0, 200)}`);
+            } else {
+                alert(`KG Node: ${id}\n\nFull graph expansion available in production (D3.js + vis-network).`);
+            }
         }
-        
+
+        function toggleRelationships() {
+            const panel = document.getElementById('relationship-list');
+            const icon = document.getElementById('rel-toggle-icon');
+            const isHidden = panel.style.display === 'none';
+            panel.style.display = isHidden ? 'block' : 'none';
+            icon.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0)';
+        }
+
+        async function refreshAllData() {
+            // Visual feedback on refresh button
+            showLoading('ontology-browser', 'Refreshing...');
+            showLoading('incident-panel', 'Refreshing...');
+            showLoading('transcript-feed', 'Refreshing...');
+            
+            // Fetch everything in parallel
+            await Promise.all([
+                fetchStats(),
+                fetchNodes(),
+                fetchIncidents(),
+                fetchRelationships()
+            ]);
+            
+            console.log('%c[Battle Buddy] All data refreshed from live KG API', 'color:#00B4D8; font-family:monospace');
+        }
+
         function refreshKG() {
-            const btns = document.querySelectorAll('.mode-btn');
-            btns.forEach(b => b.style.transitionDuration = '80ms');
-            setTimeout(() => {
-                populateOntology();
-                alert("Knowledge Graph refreshed from battle_knowledge.db (2 demo nodes + imported Battle Buddy data structure)");
-            }, 80);
+            refreshAllData();
         }
-        
+
         function exportKG() {
-            alert("Exporting battle_kg.gexf + SQLite dump...\\n\\nIn production this would download the full graph for Neo4j/Vis export.");
+            alert("Exporting battle_kg.gexf + SQLite dump...\n\nThis would download the full graph for Neo4j/Vis export.\n\nUse /api/kg/nodes and /api/kg/relationships for raw JSON exports.");
         }
-        
+
         function updateClock() {
             const clock = document.getElementById("clock");
             setInterval(() => {
@@ -381,43 +853,78 @@
                 clock.textContent = time + "Z";
             }, 1000);
         }
-        
-        // Initialize dashboard
-        function initDashboard() {
-            populateOntology();
-            populateTranscripts();
-            populateIncidents();
+
+        // =====================================================================
+        // INITIALIZATION
+        // =====================================================================
+
+        async function initDashboard() {
+            console.log('%cBattle Buddy Overwatch Dashboard initializing...', 'color:#00B4D8; font-family:monospace');
+            
+            // Start clock immediately (doesn't depend on API)
             updateClock();
+
+            // Show initial loading states are already in HTML
             
-            // Tailwind script run
+            // Fetch all data in parallel
+            console.log('[Battle Buddy] Fetching data from live KG API...');
+            await Promise.allSettled([
+                fetchStats(),
+                fetchNodes(), 
+                fetchIncidents(),
+                fetchRelationships()
+            ]);
+
             console.log('%cBattle Buddy Overwatch Dashboard initialized successfully', 'color:#00B4D8; font-family:monospace');
-            
-            // Keyboard shortcuts
+
+            // Wire up keyboard shortcuts
             document.addEventListener('keydown', function(e) {
-                if (e.key === '/' && document.getElementById('global-search') !== document.activeElement) {
+                if (e.key === '/' && document.activeElement.id !== 'global-search') {
                     e.preventDefault();
                     document.getElementById('global-search').focus();
                 }
+                if (e.key === 'Escape') {
+                    hideSearchResults();
+                    document.getElementById('global-search').blur();
+                }
+            });
+
+            // Wire up search box with debouncing
+            const searchInput = document.getElementById('global-search');
+            let searchTimeout = null;
+            searchInput.addEventListener('input', function(e) {
+                clearTimeout(searchTimeout);
+                const val = e.target.value;
+                searchTimeout = setTimeout(() => {
+                    if (val.trim().length > 0) {
+                        searchKG(val);
+                    } else {
+                        hideSearchResults();
+                    }
+                }, 300); // 300ms debounce
             });
             
-            // Demo: auto update transcript every 8s
-            let transcriptIndex = 3;
+            searchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    clearTimeout(searchTimeout);
+                    searchKG(e.target.value);
+                }
+            });
+
+            // Close search when clicking outside
+            document.addEventListener('click', function(e) {
+                const container = document.getElementById('search-container');
+                if (!container.contains(e.target)) {
+                    hideSearchResults();
+                }
+            });
+
+            // Update map clock periodically  
             setInterval(() => {
-                const feed = document.getElementById("transcript-feed");
-                const newEntry = document.createElement("div");
-                newEntry.className = "border-l-2 border-emerald-400 pl-3 animate-pulse";
-                newEntry.innerHTML = `
-                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
-                        <span>14:38:0${transcriptIndex} <span class="text-emerald-400">TG5124</span></span>
-                        <span class="text-emerald-400">LIVE</span>
-                    </div>
-                    <div class="text-emerald-200">All units, be advised we have a 10-56 at the location.</div>
-                `;
-                feed.appendChild(newEntry);
-                feed.scrollTop = feed.scrollHeight;
-                transcriptIndex++;
-                if (transcriptIndex > 9) transcriptIndex = 3;
-            }, 8500);
+                const now = new Date();
+                const el = document.getElementById('map-time');
+                if (el) el.textContent = now.toISOString().substr(11, 8) + 'Z';
+            }, 1000);
         }
         
         window.onload = initDashboard;
