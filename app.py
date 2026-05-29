@@ -34,15 +34,13 @@ def _serialize_node(node_id: str) -> dict:
     return data
 
 
-def _serialize_edge(source: str, target: str, key: str) -> dict:
+def _serialize_edge(source: str, target: str, edge_data: dict) -> dict:
     """Serialize a single edge from the graph into a plain dict."""
-    data = dict(kg.G.edges[source, target, key])
     return {
-        "id": key,
         "source": source,
         "target": target,
-        "type": data.get("type", "UNKNOWN"),
-        "properties": {k: v for k, v in data.items() if k != "type"},
+        "type": edge_data.get("type", "UNKNOWN"),
+        "properties": {k: v for k, v in edge_data.items() if k != "type"},
     }
 
 
@@ -83,8 +81,8 @@ def get_relationships():
     """Return all edges / relationships in the knowledge graph."""
     try:
         edges = [
-            _serialize_edge(src, tgt, k)
-            for src, tgt, k in kg.G.edges(keys=True)
+            _serialize_edge(src, tgt, data)
+            for src, tgt, data in kg.G.edges(data=True)
         ]
         return jsonify({
             "count": len(edges),
@@ -110,9 +108,8 @@ def get_incidents():
 
                 # Collect related calls via PART_OF edges (calls -> incident)
                 related_calls = []
-                for src, tgt, k in kg.G.in_edges(nid, keys=True):
-                    edge_data = kg.G.edges[src, tgt, k]
-                    rel_type = edge_data.get("type", "")
+                for src, tgt, data in kg.G.in_edges(nid, data=True):
+                    rel_type = data.get("type", "")
                     if rel_type == "PART_OF":
                         call_data = _serialize_node(src)
                         call_data["relationship"] = rel_type
@@ -122,9 +119,8 @@ def get_incidents():
 
                 # Collect involved agencies via INVOLVED edges
                 agencies = []
-                for src, tgt, k in kg.G.out_edges(nid, keys=True):
-                    edge_data = kg.G.edges[src, tgt, k]
-                    rel_type = edge_data.get("type", "")
+                for src, tgt, data in kg.G.out_edges(nid, data=True):
+                    rel_type = data.get("type", "")
                     if rel_type == "INVOLVED":
                         agency_data = _serialize_node(tgt)
                         agencies.append(agency_data)
@@ -189,8 +185,8 @@ def get_stats():
 
         # Edge type counts
         edge_type_counts = {}
-        for src, tgt, k in kg.G.edges(keys=True):
-            etype = kg.G.edges[src, tgt, k].get("type", "UNKNOWN")
+        for src, tgt, data in kg.G.edges(data=True):
+            etype = data.get("type", "UNKNOWN")
             edge_type_counts[etype] = edge_type_counts.get(etype, 0) + 1
 
         return jsonify({
