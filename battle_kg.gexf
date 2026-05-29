@@ -1,0 +1,49 @@
+<?xml version='1.0' encoding='utf-8'?>
+<gexf xmlns="http://www.gexf.net/1.2draft" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.gexf.net/1.2draft http://www.gexf.net/1.2draft/gexf.xsd" version="1.2">
+  <meta lastmodifieddate="2026-05-29">
+    <creator>NetworkX 3.6.1</creator>
+  </meta>
+  <graph defaultedgetype="directed" mode="static" name="">
+    <attributes mode="static" class="edge">
+      <attribute id="7" title="confidence" type="double" />
+      <attribute id="8" title="created_at" type="double" />
+      <attribute id="9" title="networkx_key" type="string" />
+    </attributes>
+    <attributes mode="static" class="node">
+      <attribute id="0" title="description" type="string" />
+      <attribute id="1" title="severity" type="double" />
+      <attribute id="2" title="lat" type="double" />
+      <attribute id="3" title="lon" type="double" />
+      <attribute id="4" title="updated_at" type="double" />
+      <attribute id="5" title="transcript" type="string" />
+      <attribute id="6" title="tgid" type="long" />
+    </attributes>
+    <nodes>
+      <node id="incident:demo1" label="Incident">
+        <attvalues>
+          <attvalue for="0" value="Demo shooting" />
+          <attvalue for="1" value="0.9" />
+          <attvalue for="2" value="32.7" />
+          <attvalue for="3" value="-97.1" />
+          <attvalue for="4" value="1780065431.2028623" />
+        </attvalues>
+      </node>
+      <node id="call:demo1" label="Call">
+        <attvalues>
+          <attvalue for="5" value="Shots fired at downtown" />
+          <attvalue for="6" value="5123" />
+          <attvalue for="4" value="1780065431.2030683" />
+        </attvalues>
+      </node>
+    </nodes>
+    <edges>
+      <edge source="call:demo1" target="incident:demo1" id="0" type="PART_OF">
+        <attvalues>
+          <attvalue for="7" value="0.85" />
+          <attvalue for="8" value="1780065431.2030907" />
+          <attvalue for="9" value="call:demo1_PART_OF_incident:demo1_1780065431" />
+        </attvalues>
+      </edge>
+    </edges>
+  </graph>
+</gexf>

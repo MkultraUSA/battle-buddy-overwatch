@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Battle Buddy // OVERWATCH</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+        
+        :root {
+            --primary: #0A1428;
+            --accent: #00B4D8;
+        }
+        
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: #0A1428;
+            color: #F0F4F8;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .panel {
+            background-color: #13213A;
+            border: 1px solid #1E3A5F;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 180, 216, 0.1);
+        }
+        
+        .header {
+            background-color: #0A1428;
+            border-bottom: 1px solid #00B4D8;
+        }
+        
+        .live-dot {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        .map-container {
+            background: linear-gradient(45deg, #0f1f38, #1a2a4a);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .map-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(circle at 30% 40%, rgba(0, 180, 216, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 70% 70%, rgba(255, 77, 77, 0.1) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        
+        .ontology-tree ul {
+            list-style: none;
+        }
+        
+        .timeline {
+            background: linear-gradient(to right, #00B4D8, #13213A);
+        }
+        
+        .mode-btn.active {
+            background-color: #00B4D8;
+            color: #0A1428;
+            border-color: #00B4D8;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+    <!-- Top Bar -->
+    <div class="header px-6 py-3 flex items-center justify-between border-b border-cyan-500">
+        <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-shield-alt text-[#00B4D8] text-2xl"></i>
+                <div>
+                    <span class="text-2xl font-bold tracking-tighter">BATTLE BUDDY</span>
+                    <span class="text-xs text-cyan-400 mono ml-2">OVERWATCH v0.1</span>
+                </div>
+            </div>
+            
+            <!-- Global Search -->
+            <div class="relative w-96">
+                <input id="global-search" 
+                       type="text" 
+                       placeholder="Search knowledge graph... (incident, tgid:5123, shots fired)"
+                       class="w-full bg-[#0A1428] border border-cyan-500/30 focus:border-cyan-400 text-sm px-4 py-2.5 rounded-lg pl-10 text-white placeholder:text-slate-400 focus:outline-none">
+                <i class="fas fa-search absolute left-3.5 top-3 text-cyan-500"></i>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-6">
+            <!-- Live Status -->
+            <div class="flex items-center gap-2 bg-[#13213A] px-4 py-1 rounded-full border border-emerald-500/30">
+                <div class="w-2 h-2 bg-emerald-400 rounded-full live-dot"></div>
+                <span class="text-xs font-medium text-emerald-400 mono">LIVE • 4 TGIDS ACTIVE</span>
+            </div>
+            
+            <!-- Mode Switcher -->
+            <div class="flex bg-[#13213A] rounded-lg p-1 border border-slate-700">
+                <button onclick="switchMode(0)" id="mode-0"
+                        class="mode-btn active px-5 py-1.5 text-xs font-medium rounded-md flex items-center gap-2">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>NORMAL</span>
+                </button>
+                <button onclick="switchMode(1)" id="mode-1"
+                        class="mode-btn px-5 py-1.5 text-xs font-medium rounded-md flex items-center gap-2">
+                    <i class="fas fa-eye"></i>
+                    <span>OVERWATCH</span>
+                </button>
+                <button onclick="switchMode(2)" id="mode-2"
+                        class="mode-btn px-5 py-1.5 text-xs font-medium rounded-md flex items-center gap-2">
+                    <i class="fas fa-timeline"></i>
+                    <span>TIMELINE</span>
+                </button>
+            </div>
+            
+            <div class="flex items-center gap-3 text-xs mono">
+                <div class="px-3 py-1 bg-amber-500/10 text-amber-400 rounded">3 INCIDENTS</div>
+                <div onclick="refreshKG()" class="cursor-pointer hover:text-cyan-400 transition-colors">
+                    <i class="fas fa-sync-alt"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="flex flex-1 overflow-hidden p-4 gap-4">
+        <!-- LEFT: Ontology Browser -->
+        <div class="w-72 flex flex-col panel">
+            <div class="px-4 py-3 border-b border-slate-700 flex justify-between items-center bg-[#0f1f38]">
+                <div class="flex items-center gap-2 text-cyan-400 text-sm font-semibold">
+                    <i class="fas fa-sitemap"></i>
+                    <span>ONTOLOGY</span>
+                </div>
+                <div class="text-[10px] mono text-slate-500">KG • 127 nodes</div>
+            </div>
+            <div class="flex-1 overflow-auto p-3 text-sm ontology-tree" id="ontology-browser">
+                <!-- Populated by JS -->
+            </div>
+            <div class="p-3 border-t border-slate-700 text-[10px] mono text-slate-500 bg-[#0A1428]">
+                14 Incidents • 87 Calls • 12 Talkgroups
+            </div>
+        </div>
+        
+        <!-- CENTER: Map -->
+        <div class="flex-1 flex flex-col gap-4">
+            <div class="flex-1 panel map-container relative" style="min-height: 420px;">
+                <div class="absolute top-4 left-4 bg-black/70 text-xs mono px-3 py-2 rounded border border-cyan-500/50 z-10">
+                    <div class="flex items-center gap-2">
+                        <span class="text-cyan-400">•</span>
+                        <span>DALLAS METRO - LIVE FEED</span>
+                    </div>
+                    <div class="text-slate-400 text-[10px] mt-1">32.8°N  96.8°W • 14:37:22Z</div>
+                </div>
+                
+                <!-- Fake map using CSS + Leaflet-like markers -->
+                <div class="absolute inset-0 flex items-center justify-center text-slate-600 text-8xl font-light mono select-none">
+                    MAP
+                </div>
+                <div class="map-overlay"></div>
+                
+                <!-- Sample incident markers -->
+                <div onclick="selectIncident(1)" class="absolute top-[35%] left-[42%] w-6 h-6 bg-red-500/80 hover:bg-red-500 rounded-full flex items-center justify-center cursor-pointer border border-white shadow-xl" title="Shooting - Downtown">
+                    <i class="fas fa-bullseye text-white text-xs"></i>
+                </div>
+                <div onclick="selectIncident(2)" class="absolute top-[55%] left-[65%] w-5 h-5 bg-amber-500/80 hover:bg-amber-500 rounded-full flex items-center justify-center cursor-pointer border border-white shadow-xl" title="Pursuit - I-35">
+                    <i class="fas fa-car text-white text-xs"></i>
+                </div>
+                
+                <div class="absolute bottom-4 right-4 bg-black/80 text-[10px] mono p-3 rounded border border-slate-600 leading-none">
+                    <div class="text-emerald-400">4 UNITS DEPLOYED</div>
+                    <div class="text-slate-400">TG 5123 • 5141</div>
+                </div>
+            </div>
+            
+            <!-- Bottom Timeline -->
+            <div class="h-28 panel flex flex-col">
+                <div class="px-4 py-2 border-b border-slate-600 flex items-center justify-between text-xs mono">
+                    <div>TIMELINE • LAST 45 MINUTES</div>
+                    <div class="flex gap-4 text-slate-400">
+                        <span class="text-cyan-400">14:12</span>
+                        <span class="text-cyan-400">14:22</span>
+                        <span class="text-cyan-400">14:29 INCIDENT</span>
+                        <span class="text-rose-400">14:37 LIVE</span>
+                    </div>
+                </div>
+                <div class="flex-1 relative flex items-center px-6 timeline">
+                    <div class="h-2 bg-cyan-400 w-full rounded-full relative">
+                        <!-- Timeline markers -->
+                        <div class="absolute left-1/4 w-3 h-3 -top-0.5 bg-white rounded-full shadow"></div>
+                        <div class="absolute left-2/3 w-3 h-3 -top-0.5 bg-red-500 rounded-full shadow ring-2 ring-red-400"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- RIGHT: Live Transcript + Incidents -->
+        <div class="w-80 flex flex-col gap-4">
+            <!-- Live Transcript -->
+            <div class="flex-1 panel flex flex-col">
+                <div class="px-4 py-3 border-b border-cyan-500/30 bg-[#0f1f38] flex items-center justify-between text-xs">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-waveform-lines text-cyan-400"></i>
+                        <span class="font-semibold text-cyan-300">LIVE TRANSCRIPT</span>
+                    </div>
+                    <div class="px-2 py-0.5 bg-cyan-900 text-cyan-300 text-[10px] rounded mono">TG: 5123</div>
+                </div>
+                <div id="transcript-feed" class="flex-1 p-4 text-sm overflow-auto space-y-5 mono text-slate-300 text-[13px] leading-tight">
+                    <!-- JS populated -->
+                </div>
+            </div>
+            
+            <!-- Active Incidents -->
+            <div class="h-64 panel flex flex-col">
+                <div class="px-4 py-3 border-b border-rose-500/30 text-xs font-medium flex items-center gap-2 text-rose-400">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    ACTIVE INCIDENTS (2)
+                </div>
+                <div class="flex-1 p-3 space-y-3 overflow-auto" id="incident-panel">
+                    <!-- JS populated -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="h-9 bg-[#0A1428] border-t border-cyan-900 flex items-center px-6 text-[10px] mono text-slate-500 justify-between">
+        <div>CONNECTED TO BATTLE_KNOWLEDGE.DB • 127 ENTITIES LOADED</div>
+        <div class="flex items-center gap-5">
+            <span onclick="exportKG()" class="cursor-pointer hover:text-cyan-400">EXPORT KG</span>
+            <span class="text-emerald-400">• MODE: OVERWATCH •</span>
+            <span id="clock" class="mono"></span>
+        </div>
+    </div>
+    
+    <script>
+        // Sample data from our KG (hardcoded for the skeleton)
+        const sampleKG = {
+            incidents: [
+                {
+                    id: 1,
+                    type: "Shooting",
+                    description: "Shots fired near downtown. Possible suspect fleeing northbound.",
+                    time: "14:29",
+                    confidence: 0.92,
+                    location: "Downtown Sector",
+                    linked: ["tgid:5123", "call:4871"]
+                },
+                {
+                    id: 2,
+                    type: "Pursuit",
+                    description: "Vehicle pursuit in progress. Black sedan, partial plate K4R.",
+                    time: "14:35",
+                    confidence: 0.78,
+                    location: "I-35 North",
+                    linked: ["tgid:5142"]
+                }
+            ],
+            transcripts: [
+                {time: "14:37:11", tgid: "5123", text: "Shots fired, I have one down. Requesting backup at Main and 5th.", confidence: "HIGH"},
+                {time: "14:37:22", tgid: "5123", text: " suspect last seen heading west on Elm. Possible 10-33.", confidence: "MED"},
+                {time: "14:37:45", tgid: "5141", text: "Copy that APD. Fire is enroute.", confidence: "LOW"}
+            ],
+            ontologyNodes: [
+                {id: "incident:1", label: "Incident", name: "Downtown Shooting", children: 3},
+                {id: "tg:5123", label: "Talkgroup", name: "APD Dispatch 1", children: 12},
+                {id: "pattern:shots", label: "Pattern", name: "Shots Fired", children: 5}
+            ]
+        };
+        
+        function populateOntology() {
+            const container = document.getElementById("ontology-browser");
+            let html = `<ul class="space-y-2 text-xs">`;
+            sampleKG.ontologyNodes.forEach(node => {
+                html += `
+                    <li onclick="inspectNode('${node.id}')" class="flex items-center gap-2 hover:bg-slate-800 p-2 rounded cursor-pointer border-l-2 border-cyan-500">
+                        <span class="text-cyan-400 mono w-16">${node.label}</span>
+                        <span class="flex-1">${node.name}</span>
+                        <span class="text-slate-500 mono">+${node.children}</span>
+                    </li>`;
+            });
+            html += `</ul>`;
+            container.innerHTML = html;
+        }
+        
+        function populateTranscripts() {
+            const container = document.getElementById("transcript-feed");
+            let html = '';
+            sampleKG.transcripts.forEach(t => {
+                html += `
+                <div class="border-l-2 border-cyan-400 pl-3">
+                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                        <span>${t.time} <span class="text-cyan-400">TG${t.tgid}</span></span>
+                        <span class="text-emerald-400">${t.confidence}</span>
+                    </div>
+                    <div class="text-slate-200">${t.text}</div>
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+        
+        function populateIncidents() {
+            const container = document.getElementById("incident-panel");
+            let html = '';
+            sampleKG.incidents.forEach(inc => {
+                html += `
+                <div onclick="selectIncident(${inc.id})" class="bg-[#0f1f38] hover:bg-[#1a2a45] p-3 rounded border border-red-500/30 cursor-pointer">
+                    <div class="flex justify-between text-xs">
+                        <div class="font-semibold text-red-300">${inc.type}</div>
+                        <div class="mono text-slate-400">${inc.time}</div>
+                    </div>
+                    <div class="text-sm leading-tight mt-1.5 text-slate-200 line-clamp-2">${inc.description}</div>
+                    <div class="text-[10px] text-cyan-400 mt-2 flex gap-2">
+                        <span class="bg-cyan-900/60 px-2 py-px rounded">${inc.location}</span>
+                        <span class="mono">${(inc.confidence*100).toFixed(0)}%</span>
+                    </div>
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+        
+        function switchMode(mode) {
+            document.querySelectorAll('.mode-btn').forEach((btn, i) => {
+                if (i === mode) {
+                    btn.classList.add('active', 'shadow-inner');
+                } else {
+                    btn.classList.remove('active', 'shadow-inner');
+                }
+            });
+            
+            const mapEl = document.querySelector('.map-container');
+            if (mode === 2) {
+                mapEl.style.opacity = '0.6';
+                alert("Timeline view activated — all panels now synchronized to time scrubber (demo)");
+            } else if (mode === 1) {
+                mapEl.style.opacity = '1';
+            }
+        }
+        
+        function selectIncident(id) {
+            const inc = sampleKG.incidents.find(i => i.id === id);
+            if (inc) {
+                alert(`Incident selected: ${inc.type}\\n\\n${inc.description}\\n\\nLinked KG entities: ${inc.linked.join(', ')}\\n\\nOpening full ontology view...`);
+            }
+        }
+        
+        function inspectNode(id) {
+            alert(`KG Node: ${id}\\n\\nThis would trigger full graph expansion in production (D3.js + vis-network). Sample data from battle_knowledge.db loaded successfully.`);
+        }
+        
+        function refreshKG() {
+            const btns = document.querySelectorAll('.mode-btn');
+            btns.forEach(b => b.style.transitionDuration = '80ms');
+            setTimeout(() => {
+                populateOntology();
+                alert("Knowledge Graph refreshed from battle_knowledge.db (2 demo nodes + imported Battle Buddy data structure)");
+            }, 80);
+        }
+        
+        function exportKG() {
+            alert("Exporting battle_kg.gexf + SQLite dump...\\n\\nIn production this would download the full graph for Neo4j/Vis export.");
+        }
+        
+        function updateClock() {
+            const clock = document.getElementById("clock");
+            setInterval(() => {
+                const now = new Date();
+                const time = now.toLocaleTimeString('en-GB', {hour12: false}).replace(/:/g, ':');
+                clock.textContent = time + "Z";
+            }, 1000);
+        }
+        
+        // Initialize dashboard
+        function initDashboard() {
+            populateOntology();
+            populateTranscripts();
+            populateIncidents();
+            updateClock();
+            
+            // Tailwind script run
+            console.log('%cBattle Buddy Overwatch Dashboard initialized successfully', 'color:#00B4D8; font-family:monospace');
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                if (e.key === '/' && document.getElementById('global-search') !== document.activeElement) {
+                    e.preventDefault();
+                    document.getElementById('global-search').focus();
+                }
+            });
+            
+            // Demo: auto update transcript every 8s
+            let transcriptIndex = 3;
+            setInterval(() => {
+                const feed = document.getElementById("transcript-feed");
+                const newEntry = document.createElement("div");
+                newEntry.className = "border-l-2 border-emerald-400 pl-3 animate-pulse";
+                newEntry.innerHTML = `
+                    <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                        <span>14:38:0${transcriptIndex} <span class="text-emerald-400">TG5124</span></span>
+                        <span class="text-emerald-400">LIVE</span>
+                    </div>
+                    <div class="text-emerald-200">All units, be advised we have a 10-56 at the location.</div>
+                `;
+                feed.appendChild(newEntry);
+                feed.scrollTop = feed.scrollHeight;
+                transcriptIndex++;
+                if (transcriptIndex > 9) transcriptIndex = 3;
+            }, 8500);
+        }
+        
+        window.onload = initDashboard;
+    </script>
+</body>
+</html>
