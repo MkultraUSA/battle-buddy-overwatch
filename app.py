@@ -136,6 +136,47 @@ def get_incidents():
         return _json_error(f"Failed to retrieve incidents: {exc}", 500)
 
 
+@app.route("/api/kg/filter-options", methods=["GET"])
+def get_filter_options():
+    """Return unique agencies and talkgroups for filter UI."""
+    try:
+        agencies = {}
+        talkgroups = {}
+
+        for nid in kg.G.nodes():
+            data = dict(kg.G.nodes[nid])
+            label = data.get("label", "")
+
+            if label == "Agency":
+                name = data.get("name", nid)
+                agency_type = data.get("type", "unknown")
+                agencies[nid] = {
+                    "id": nid,
+                    "name": name,
+                    "type": agency_type,
+                    "color": data.get("color", "#00B4D8"),
+                }
+
+            if label == "Talkgroup":
+                tg_name = data.get("name", nid)
+                tg_agency = data.get("agency", "")
+                tg_category = data.get("category", "")
+                talkgroups[nid] = {
+                    "id": nid,
+                    "name": tg_name,
+                    "agency": tg_agency,
+                    "category": tg_category,
+                    "tgid": data.get("tgid", ""),
+                }
+
+        return jsonify({
+            "agencies": list(agencies.values()),
+            "talkgroups": list(talkgroups.values()),
+        })
+    except Exception as exc:
+        return _json_error(f"Failed to retrieve filter options: {exc}", 500)
+
+
 @app.route("/api/kg/search", methods=["GET"])
 def search_nodes():
     """Search nodes by name, type, or description using the 'q' query param."""

@@ -142,6 +142,25 @@
             border-color: #00B4D8;
         }
 
+        /* Agency filter buttons */
+        .agency-btn.active {
+            background-color: #00B4D8;
+            color: #0A1428;
+            border-color: #00B4D8;
+        }
+
+        .agency-btn:not(.active) {
+            background-color: transparent;
+            color: #94a3b8;
+            border-color: #334155;
+        }
+
+        .agency-btn:not(.active):hover {
+            background-color: rgba(0, 180, 216, 0.1);
+            color: #00B4D8;
+            border-color: #00B4D8;
+        }
+
         /* Search dropdown */
         .search-results-dropdown {
             max-height: 300px;
@@ -225,7 +244,37 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Agency / Talkgroup Filter Bar -->
+    <div id="filter-bar" class="px-6 py-2 bg-[#0c1a30] border-b border-slate-700 flex items-center gap-3">
+        <div class="flex items-center gap-2 text-[10px] mono text-slate-400 mr-1">
+            <i class="fas fa-filter text-cyan-500"></i>
+            <span>AGENCY FILTER</span>
+        </div>
+        <div id="agency-filters" class="flex items-center gap-2">
+            <button onclick="setAgencyFilter('ALL')" id="agency-btn-ALL"
+                    class="agency-btn active px-3 py-1 text-[10px] font-medium rounded border border-cyan-500/50 bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 transition-colors">
+                ALL <span class="ml-1 text-[9px] opacity-60" id="agency-count-ALL">0</span>
+            </button>
+            <!-- Agency buttons populated dynamically -->
+        </div>
+        <div class="flex items-center gap-2 ml-auto">
+            <div class="flex items-center gap-2 text-[10px] mono text-slate-400 mr-1">
+                <i class="fas fa-broadcast-tower text-emerald-500"></i>
+                <span>TALKGROUP</span>
+            </div>
+            <select id="talkgroup-filter" onchange="setTalkGroupFilter(this.value)"
+                    class="bg-[#0A1428] border border-cyan-500/30 text-[10px] text-slate-300 rounded px-2 py-1 focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="ALL">ALL CHANNELS</option>
+                <!-- Options populated dynamically -->
+            </select>
+        </div>
+        <div id="active-filter-indicator" class="hidden items-center gap-1 text-[9px] mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+            <i class="fas fa-eye"></i>
+            <span id="active-filter-text">FILTERED</span>
+        </div>
+    </div>
+
     <div class="flex flex-1 overflow-hidden p-4 gap-4">
         <!-- LEFT: Ontology Browser -->
         <div class="w-72 flex flex-col panel">
@@ -350,6 +399,13 @@
         let cachedNodes = null;
         let cachedIncidents = null;
         let cachedRelationships = null;
+        let cachedFilterOptions = null;
+
+        // ---- Filter state ----
+        let activeAgencyFilter = 'ALL';
+        let activeTalkgroupFilter = 'ALL';
+        let incidentAgencyIndex = null; // Map<agencyId, Set<incidentId>>
+        let incidentTgIndex = null;     // Map<tgId/tgNodeId, Set<incidentId>>
 
         // ---- Polling state ----
         let pollTimer = null;
@@ -456,10 +512,15 @@
             const data = await apiFetch('api/kg/incidents', 'Failed to load incidents');
             if (data && !data.error) {
                 cachedIncidents = data.incidents;
-                renderIncidents(data.incidents, data.count);
-                renderTranscriptFromIncidents(data.incidents);
-                renderTimelineFromIncidents(data.incidents);
-                renderMapMarkers(data.incidents);
+                rebuildIncidentAgencyIndex();
+                if (activeAgencyFilter !== 'ALL' || activeTalkgroupFilter !== 'ALL') {
+                    applyFilters();
+                } else {
+                    renderIncidents(data.incidents, data.count);
+                    renderTranscriptFromIncidents(data.incidents);
+                    renderTimelineFromIncidents(data.incidents);
+                    renderMapMarkers(data.incidents);
+                }
             } else {
                 showError('incident-panel', data?.error || 'Failed to load incidents.');
                 showError('transcript-feed', data?.error || 'Failed to load transcript data.');
@@ -484,6 +545,305 @@
                 renderSearchResults(data.results, data.query);
             } else {
                 renderSearchResults([], query, data?.error || 'Search error');
+            }
+        }
+
+        // =====================================================================
+        // FILTER AGENCY / TALKGROUP LOGIC
+        // =====================================================================
+
+        async function fetchFilterOptions() {
+            const data = await apiFetch('api/kg/filter-options', 'Failed to load filter options');
+            if (data && !data.error) {
+                cachedFilterOptions = data;
+                populateFilterUI(data);
+                rebuildIncidentAgencyIndex();
+            }
+        }
+
+        function populateFilterUI(options) {
+            const agencyContainer = document.getElementById('agency-filters');
+            const tgSelect = document.getElementById('talkgroup-filter');
+
+            // Build agency buttons
+            let agencyHtml = '';
+            (options.agencies || []).forEach(ag => {
+                const agencyId = ag.id.replace(/['"]/g, '\\\'');
+                agencyHtml += `<button onclick="setAgencyFilter('${agencyId}')" id="agency-btn-${ag.id}"
+                    class="agency-btn px-3 py-1 text-[10px] font-medium rounded border border-slate-600 text-slate-400 hover:bg-cyan-500/10 hover:text-cyan-400 hover:border-cyan-500 transition-colors">
+                    ${escapeHtml(ag.name.length > 10 ? ag.name.substring(0, 10) : ag.name)}
+                    <span class="ml-1 text-[9px] opacity-60" id="agency-count-${ag.id}">0</span>
+                </button>`;
+            });
+            // Prepend the ALL button (which is already in the HTML) with agencies after
+            const existing = agencyContainer.innerHTML;
+            // Keep the ALL button, insert agencies after it
+            const allBtnEnd = existing.indexOf('<!-- Agency buttons') !== -1
+                ? existing.indexOf('<!-- Agency buttons') + '<!-- Agency buttons populated dynamically -->'.length
+                : existing.length;
+            agencyContainer.innerHTML = existing.substring(0, allBtnEnd) + agencyHtml;
+
+            // Build talkgroup dropdown options
+            let tgOptions = '<option value="ALL">ALL CHANNELS</option>';
+            (options.talkgroups || []).forEach(tg => {
+                const label = tg.name
+                    ? `${escapeHtml(tg.name)}${tg.tgid ? ' (TG' + tg.tgid + ')' : ''}`
+                    : escapeHtml(tg.id);
+                tgOptions += `<option value="${escapeHtml(tg.id)}">${label}</option>`;
+            });
+            tgSelect.innerHTML = tgOptions;
+        }
+
+        function rebuildIncidentAgencyIndex() {
+            // Build maps: agencyId -> Set<incidentId>, tgId/tgNodeId -> Set<incidentId>
+            incidentAgencyIndex = {};
+            incidentTgIndex = {};
+
+            if (!cachedIncidents) return;
+
+            cachedIncidents.forEach(inc => {
+                const agencies = inc.agencies || [];
+                agencies.forEach(ag => {
+                    const agId = ag.id || ag;
+                    if (!incidentAgencyIndex[agId]) {
+                        incidentAgencyIndex[agId] = new Set();
+                    }
+                    incidentAgencyIndex[agId].add(inc.id);
+                });
+
+                // Index by talkgroup from related calls
+                const calls = inc.related_calls || [];
+                calls.forEach(call => {
+                    const tgId = String(call.tgid || '');
+                    const tgNodeId = call.id || '';
+                    if (tgId && tgId !== '0' && tgId !== '??') {
+                        if (!incidentTgIndex[tgId]) incidentTgIndex[tgId] = new Set();
+                        incidentTgIndex[tgId].add(inc.id);
+                    }
+                    if (tgNodeId) {
+                        if (!incidentTgIndex[tgNodeId]) incidentTgIndex[tgNodeId] = new Set();
+                        incidentTgIndex[tgNodeId].add(inc.id);
+                    }
+                });
+            });
+
+            // Update count badges for each agency
+            const totalIncidents = cachedIncidents.length;
+            const allCountEl = document.getElementById('agency-count-ALL');
+            if (allCountEl) allCountEl.textContent = totalIncidents;
+
+            if (cachedFilterOptions && cachedFilterOptions.agencies) {
+                cachedFilterOptions.agencies.forEach(ag => {
+                    const count = incidentAgencyIndex[ag.id] ? incidentAgencyIndex[ag.id].size : 0;
+                    const countEl = document.getElementById(`agency-count-${ag.id}`);
+                    if (countEl) countEl.textContent = count;
+                });
+            }
+        }
+
+        function setAgencyFilter(agencyId) {
+            activeAgencyFilter = agencyId;
+
+            // Update button states
+            document.querySelectorAll('.agency-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-cyan-500/20', 'text-cyan-300', 'border-cyan-500/50');
+                btn.classList.add('border-slate-600', 'text-slate-400');
+            });
+
+            const activeBtn = document.getElementById(`agency-btn-${agencyId}`);
+            if (activeBtn) {
+                activeBtn.classList.add('active', 'bg-cyan-500/20', 'text-cyan-300', 'border-cyan-500/50');
+                activeBtn.classList.remove('border-slate-600', 'text-slate-400');
+            }
+
+            // Update active filter indicator
+            updateFilterIndicator();
+
+            // Re-render with filter
+            applyFilters();
+        }
+
+        function setTalkGroupFilter(tgId) {
+            activeTalkgroupFilter = tgId;
+            updateFilterIndicator();
+            applyFilters();
+        }
+
+        function updateFilterIndicator() {
+            const indicator = document.getElementById('active-filter-indicator');
+            const text = document.getElementById('active-filter-text');
+
+            if (activeAgencyFilter === 'ALL' && activeTalkgroupFilter === 'ALL') {
+                indicator.classList.add('hidden');
+                indicator.classList.remove('flex');
+            } else {
+                indicator.classList.remove('hidden');
+                indicator.classList.add('flex');
+                const parts = [];
+                if (activeAgencyFilter !== 'ALL') {
+                    // Find the agency name
+                    if (cachedFilterOptions) {
+                        const ag = cachedFilterOptions.agencies.find(a => a.id === activeAgencyFilter);
+                        parts.push(ag ? ag.name : activeAgencyFilter);
+                    } else {
+                        parts.push(activeAgencyFilter);
+                    }
+                }
+                if (activeTalkgroupFilter !== 'ALL') {
+                    if (cachedFilterOptions) {
+                        const tg = cachedFilterOptions.talkgroups.find(t => t.id === activeTalkgroupFilter);
+                        parts.push(tg ? (tg.name || tg.id) : activeTalkgroupFilter);
+                    } else {
+                        parts.push(activeTalkgroupFilter);
+                    }
+                }
+                text.textContent = parts.join(' + ');
+            }
+
+            // Update the ALL CHANNELS badge in transcript header
+            const badgeEl = document.getElementById('transcript-tg-badge');
+            if (badgeEl) {
+                if (activeTalkgroupFilter !== 'ALL') {
+                    if (cachedFilterOptions) {
+                        const tg = cachedFilterOptions.talkgroups.find(t => t.id === activeTalkgroupFilter);
+                        badgeEl.textContent = tg ? `TG${tg.tgid || ''} ${tg.name || tg.id}` : activeTalkgroupFilter;
+                    } else {
+                        badgeEl.textContent = activeTalkgroupFilter;
+                    }
+                    badgeEl.classList.remove('bg-cyan-900', 'text-cyan-300');
+                    badgeEl.classList.add('bg-amber-900', 'text-amber-300');
+                } else if (activeAgencyFilter !== 'ALL') {
+                    if (cachedFilterOptions) {
+                        const ag = cachedFilterOptions.agencies.find(a => a.id === activeAgencyFilter);
+                        badgeEl.textContent = ag ? `${ag.name} ONLY` : activeAgencyFilter;
+                    } else {
+                        badgeEl.textContent = activeAgencyFilter;
+                    }
+                    badgeEl.classList.remove('bg-cyan-900', 'text-cyan-300');
+                    badgeEl.classList.add('bg-amber-900', 'text-amber-300');
+                } else {
+                    badgeEl.textContent = 'ALL CHANNELS';
+                    badgeEl.classList.remove('bg-amber-900', 'text-amber-300');
+                    badgeEl.classList.add('bg-cyan-900', 'text-cyan-300');
+                }
+            }
+        }
+
+        function applyFilters() {
+            if (!cachedIncidents) return;
+
+            let filteredIncidents = cachedIncidents;
+
+            // Apply agency filter
+            if (activeAgencyFilter !== 'ALL' && incidentAgencyIndex) {
+                const matchingIds = incidentAgencyIndex[activeAgencyFilter];
+                if (matchingIds) {
+                    filteredIncidents = filteredIncidents.filter(inc => matchingIds.has(inc.id));
+                } else {
+                    filteredIncidents = [];
+                }
+            }
+
+            // Apply talkgroup filter
+            if (activeTalkgroupFilter !== 'ALL' && incidentTgIndex) {
+                // Resolve the talkgroup filter to a tgId string
+                let tgFilterIds = new Set();
+                if (incidentTgIndex[activeTalkgroupFilter]) {
+                    tgFilterIds = incidentTgIndex[activeTalkgroupFilter];
+                } else {
+                    // Try resolving via filter options (match by tgid number)
+                    if (cachedFilterOptions) {
+                        const tgInfo = cachedFilterOptions.talkgroups.find(t => t.id === activeTalkgroupFilter);
+                        if (tgInfo && tgInfo.tgid) {
+                            if (incidentTgIndex[String(tgInfo.tgid)]) {
+                                tgFilterIds = incidentTgIndex[String(tgInfo.tgid)];
+                            }
+                        }
+                    }
+                }
+                if (tgFilterIds.size > 0) {
+                    filteredIncidents = filteredIncidents.filter(inc => tgFilterIds.has(inc.id));
+                } else if (activeTalkgroupFilter !== 'ALL') {
+                    // No matching incidents for this talkgroup
+                    filteredIncidents = [];
+                }
+            }
+
+            // Re-render with filtered data
+            renderIncidents(filteredIncidents, filteredIncidents.length);
+            renderMapMarkers(filteredIncidents);
+            renderTimelineFromIncidents(filteredIncidents);
+            renderTranscriptWithFilter(filteredIncidents);
+        }
+
+        function renderTranscriptWithFilter(incidents) {
+            const container = document.getElementById('transcript-feed');
+
+            if (!incidents || incidents.length === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-xs text-center p-4">No matching transcript entries.</div>';
+                return;
+            }
+
+            let html = '';
+            let entryCount = 0;
+
+            incidents.forEach(inc => {
+                const calls = inc.related_calls || [];
+                calls.forEach(call => {
+                    // Apply talkgroup filter per call
+                    if (activeTalkgroupFilter !== 'ALL') {
+                        const callTgId = String(call.tgid || '');
+                        const callNodeId = call.id || '';
+                        const tgNodeId = activeTalkgroupFilter;
+
+                        if (callTgId !== String(tgNodeId) && callNodeId !== tgNodeId) {
+                            // Check against filter options for additional matching
+                            if (cachedFilterOptions) {
+                                const tgInfo = cachedFilterOptions.talkgroups.find(t => t.id === tgNodeId);
+                                if (tgInfo && String(callTgId) !== String(tgInfo.tgid)) {
+                                    return; // skip this call
+                                }
+                            } else {
+                                return; // skip if no filter info
+                            }
+                        }
+                    }
+
+                    const callTime = call.timestamp || call.time || call.created_at || '--:--';
+                    const tgId = call.tgid || call.talkgroup || call.label || '??';
+                    const callText = call.text || call.transcript || call.description || call.name || '(no transcript)';
+                    const conf = call.confidence || call.score || 'MED';
+
+                    html += `
+                    <div class="border-l-2 border-cyan-400 pl-3">
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                            <span>${escapeHtml(String(callTime).substring(0, 12))} <span class="text-cyan-400">TG${escapeHtml(String(tgId))}</span></span>
+                            <span class="${typeof conf === 'number' && conf >= 0.7 ? 'text-emerald-400' : typeof conf === 'string' && conf === 'HIGH' ? 'text-emerald-400' : 'text-amber-400'}">${escapeHtml(String(conf))}</span>
+                        </div>
+                        <div class="text-slate-200">${escapeHtml(String(callText))}</div>
+                    </div>`;
+                    entryCount++;
+                });
+
+                // If no calls, show incident itself
+                if (calls.length === 0) {
+                    const incTime = inc.timestamp || inc.time || inc.created_at || '--:--';
+                    html += `
+                    <div class="border-l-2 border-rose-400 pl-3">
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                            <span>${escapeHtml(String(incTime).substring(0, 12))} <span class="text-rose-400">INCIDENT</span></span>
+                            <span class="text-red-400">ALERT</span>
+                        </div>
+                        <div class="text-slate-200">${escapeHtml(inc.description || inc.name || 'No details')}</div>
+                    </div>`;
+                    entryCount++;
+                }
+            });
+
+            if (entryCount === 0) {
+                container.innerHTML = '<div class="text-slate-500 text-xs text-center p-4">No matching transcript entries.</div>';
+            } else {
+                container.innerHTML = html;
             }
         }
 
@@ -962,7 +1322,8 @@
                 fetchStats(),
                 fetchNodes(),
                 fetchIncidents(),
-                fetchRelationships()
+                fetchRelationships(),
+                fetchFilterOptions()
             ]);
             
             console.log('%c[Battle Buddy] All data refreshed from live KG API', 'color:#00B4D8; font-family:monospace');
@@ -1204,7 +1565,8 @@
                 fetchStats(),
                 fetchNodes(),
                 fetchIncidents(),
-                fetchRelationships()
+                fetchRelationships(),
+                fetchFilterOptions()
             ]);
 
             console.log('%cBattle Buddy Overwatch Dashboard initialized successfully', 'color:#00B4D8; font-family:monospace');
