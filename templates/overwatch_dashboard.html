@@ -359,6 +359,10 @@
         let consecutiveErrors = 0;
         const MAX_CONSECUTIVE_ERRORS = 5;
 
+        // ---- Alert tracking (prevent duplicate alerts) ----
+        let alertedIncidentIds = new Set();
+        let audioCtx = null; // lazy-init on first user interaction
+
         // ---- Quick change detection (lightweight, no deep compare) ----
         function hasChanged(newData, cacheKey) {
             if (newData === null || newData === undefined) return false;
@@ -1016,6 +1020,9 @@
                         if (dot) { dot.classList.remove('bg-red-500'); dot.classList.add('bg-emerald-400'); }
                     }
 
+                    // Check for new high-severity incidents
+                    if (cachedIncidents) checkForNewAlerts(cachedIncidents);
+
                     updateFooterTimestamp();
                 } catch (e) {
                     console.error('[Overwatch] Poll cycle error:', e);
@@ -1048,6 +1055,122 @@
             if (footer && cachedStats) {
                 footer.textContent =
                     `CONNECTED \u2022 ${cachedStats.node_count} ENTITIES \u2022 ${cachedStats.edge_count} RELATIONS \u2022 UPDATED ${ts}`;
+            }
+        }
+
+        // =====================================================================
+        // ALERT SYSTEM — Audio + Visual + Desktop Notifications
+        // =====================================================================
+
+        function playAlertSound(severity) {
+            // Lazy-init AudioContext on first use (browser policy)
+            if (!audioCtx) {
+                try {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.warn('[Overwatch] AudioContext not available:', e);
+                    return;
+                }
+            }
+
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                // Tactical beep — higher pitch for higher severity
+                const freq = severity >= 6 ? 880 : severity >= 5 ? 660 : 440;
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+                // Short beep pattern: two quick beeps for critical
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0, audioCtx.currentTime + 0.15);
+                if (severity >= 5) {
+                    gain.gain.setValueAtTime(0.15, audioCtx.currentTime + 0.2);
+                    gain.gain.setValueAtTime(0, audioCtx.currentTime + 0.35);
+                    osc.stop(audioCtx.currentTime + 0.4);
+                } else {
+                    osc.stop(audioCtx.currentTime + 0.2);
+                }
+                osc.start(audioCtx.currentTime);
+            } catch (e) {
+                console.warn('[Overwatch] Alert sound failed:', e);
+            }
+        }
+
+        function flashMapBorder() {
+            const mapContainer = document.querySelector('.map-container');
+            if (!mapContainer) return;
+
+            // Red border pulse
+            mapContainer.style.transition = 'box-shadow 0.15s ease-out';
+            mapContainer.style.boxShadow = '0 0 30px rgba(255, 0, 0, 0.6), 0 0 60px rgba(255, 0, 0, 0.3)';
+            setTimeout(() => {
+                mapContainer.style.boxShadow = '0 4px 12px rgba(0, 180, 216, 0.1)';
+                setTimeout(() => {
+                    mapContainer.style.boxShadow = '0 0 30px rgba(255, 0, 0, 0.6), 0 0 60px rgba(255, 0, 0, 0.3)';
+                    setTimeout(() => {
+                        mapContainer.style.boxShadow = '0 4px 12px rgba(0, 180, 216, 0.1)';
+                    }, 200);
+                }, 200);
+            }, 200);
+        }
+
+        function flashIncidentPanel() {
+            const panel = document.getElementById('incident-panel');
+            if (!panel) return;
+            panel.style.transition = 'border-color 0.2s';
+            panel.style.border = '2px solid #ff4444';
+            setTimeout(() => { panel.style.border = ''; }, 2000);
+        }
+
+        function sendDesktopNotification(itype, desc, severity) {
+            if (!('Notification' in window)) return;
+
+            if (Notification.permission === 'granted') {
+                new Notification(`[SEV ${severity}] ${itype}`, {
+                    body: desc ? desc.substring(0, 120) : 'New high-severity incident detected',
+                    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="%23ff4444"/><text x="16" y="21" text-anchor="middle" fill="white" font-size="14" font-weight="bold">!</text></svg>',
+                    tag: 'overwatch-alert',
+                    requireInteraction: severity >= 6
+                });
+            } else if (Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        }
+
+        function checkForNewAlerts(incidents) {
+            if (!incidents || incidents.length === 0) return;
+
+            const alertThreshold = 4; // severity >= 4 triggers alert
+
+            incidents.forEach(inc => {
+                const severity = parseInt(inc.severity) || 0;
+                if (severity < alertThreshold) return;
+
+                const id = inc.id;
+                if (alertedIncidentIds.has(id)) return; // already alerted
+
+                // New high-severity incident!
+                alertedIncidentIds.add(id);
+
+                const itype = inc.itype || inc.type || 'Incident';
+                const desc = inc.description || '';
+
+                console.log(`[Overwatch] ALERT: ${itype} (sev ${severity}) — ${id}`);
+
+                playAlertSound(severity);
+                flashMapBorder();
+                flashIncidentPanel();
+                sendDesktopNotification(itype, desc, severity);
+            });
+
+            // Prune alert set: remove IDs that are no longer in the incident list
+            const currentIds = new Set(incidents.map(i => i.id));
+            for (const id of alertedIncidentIds) {
+                if (!currentIds.has(id)) alertedIncidentIds.delete(id);
             }
         }
 
@@ -1089,6 +1212,11 @@
             // Start live polling
             updateFooterTimestamp();
             startPolling();
+
+            // Request notification permission (non-blocking)
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
 
             // Wire up keyboard shortcuts
             document.addEventListener('keydown', function(e) {
