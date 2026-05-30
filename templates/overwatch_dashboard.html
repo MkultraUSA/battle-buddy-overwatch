@@ -351,6 +351,39 @@
         let cachedIncidents = null;
         let cachedRelationships = null;
 
+        // ---- Polling state ----
+        let pollTimer = null;
+        const POLL_INTERVAL_MS = 8000;  // 8 seconds between refreshes
+        let pollingPaused = false;
+        let lastUpdatedTime = null;
+        let consecutiveErrors = 0;
+        const MAX_CONSECUTIVE_ERRORS = 5;
+
+        // ---- Quick change detection (lightweight, no deep compare) ----
+        function hasChanged(newData, cacheKey) {
+            if (newData === null || newData === undefined) return false;
+            if (window[cacheKey] === null || window[cacheKey] === undefined) return true;
+
+            // Compare by count/structural fingerprint, not full JSON
+            const prev = window[cacheKey];
+            const curr = newData;
+
+            if (cacheKey === 'cachedStats') {
+                return (prev.node_count !== curr.node_count ||
+                        prev.edge_count !== curr.edge_count);
+            }
+            if (cacheKey === 'cachedNodes') {
+                return (prev.length !== curr.length);
+            }
+            if (cacheKey === 'cachedIncidents') {
+                return (prev.length !== curr.length);
+            }
+            if (cacheKey === 'cachedRelationships') {
+                return (prev.length !== curr.length);
+            }
+            return true; // unknown type, re-render
+        }
+
         // ---- Utility: safe fetch wrapper with error handling ----
         async function apiFetch(url, errorMsg) {
             try {
@@ -939,6 +972,85 @@
             alert("Exporting battle_kg.gexf + SQLite dump...\n\nThis would download the full graph for Neo4j/Vis export.\n\nUse /api/kg/nodes and /api/kg/relationships for raw JSON exports.");
         }
 
+        // =====================================================================
+        // LIVE POLLING
+        // =====================================================================
+
+        function startPolling() {
+            if (pollTimer) return; // already running
+
+            console.log(`[Overwatch] Starting live poll every ${POLL_INTERVAL_MS / 1000}s`);
+            pollTimer = setInterval(async () => {
+                if (pollingPaused) return;
+
+                try {
+                    const results = await Promise.allSettled([
+                        fetchStats(),
+                        fetchNodes(),
+                        fetchIncidents(),
+                        fetchRelationships()
+                    ]);
+
+                    // Check for errors
+                    const failed = results.filter(r => r.status === 'rejected');
+                    if (failed.length > 0) {
+                        consecutiveErrors++;
+                        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                            console.warn('[Overwatch] Too many consecutive errors, pausing polling');
+                            document.getElementById('live-status-text').textContent = 'LIVE \u2022 API ERROR';
+                            document.getElementById('live-status-text').parentElement.classList.add('border-red-500/50');
+                            document.getElementById('live-status-text').parentElement.classList.remove('border-emerald-500/30');
+                            document.querySelector('.live-dot').classList.remove('bg-emerald-400');
+                            document.querySelector('.live-dot').classList.add('bg-red-500');
+                        }
+                    } else {
+                        consecutiveErrors = 0;
+                        // Restore green status if it was red
+                        const statusEl = document.getElementById('live-status-text');
+                        if (statusEl.textContent.includes('ERROR')) {
+                            statusEl.innerHTML = 'LIVE \u2022 POLLING';
+                        }
+                        statusEl.parentElement.classList.remove('border-red-500/50');
+                        statusEl.parentElement.classList.add('border-emerald-500/30');
+                        const dot = document.querySelector('.live-dot');
+                        if (dot) { dot.classList.remove('bg-red-500'); dot.classList.add('bg-emerald-400'); }
+                    }
+
+                    updateFooterTimestamp();
+                } catch (e) {
+                    console.error('[Overwatch] Poll cycle error:', e);
+                }
+            }, POLL_INTERVAL_MS);
+        }
+
+        function stopPolling() {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+                console.log('[Overwatch] Polling stopped');
+            }
+        }
+
+        function pausePolling() {
+            pollingPaused = true;
+            document.getElementById('live-status-text').textContent = 'LIVE \u2022 PAUSED';
+        }
+
+        function resumePolling() {
+            pollingPaused = false;
+            document.getElementById('live-status-text').textContent = 'LIVE \u2022 POLLING';
+        }
+
+        function updateFooterTimestamp() {
+            lastUpdatedTime = new Date();
+            const ts = lastUpdatedTime.toISOString().substr(11, 12) + 'Z';
+            const footer = document.getElementById('footer-status');
+            if (footer && cachedStats) {
+                footer.textContent =
+                    `CONNECTED \u2022 ${cachedStats.node_count} ENTITIES \u2022 ${cachedStats.edge_count} RELATIONS \u2022 UPDATED ${ts}`;
+            }
+        }
+
         function updateClock() {
             const clock = document.getElementById("clock");
             setInterval(() => {
@@ -967,12 +1079,16 @@
             console.log('[Battle Buddy] Fetching data from live KG API...');
             await Promise.allSettled([
                 fetchStats(),
-                fetchNodes(), 
+                fetchNodes(),
                 fetchIncidents(),
                 fetchRelationships()
             ]);
 
             console.log('%cBattle Buddy Overwatch Dashboard initialized successfully', 'color:#00B4D8; font-family:monospace');
+
+            // Start live polling
+            updateFooterTimestamp();
+            startPolling();
 
             // Wire up keyboard shortcuts
             document.addEventListener('keydown', function(e) {
@@ -1007,6 +1123,26 @@
                     searchKG(e.target.value);
                 }
             });
+
+            // Pause polling while user is searching (focus = paused, blur = resume)
+            searchInput.addEventListener('focus', function() {
+                pausePolling();
+            });
+            searchInput.addEventListener('blur', function() {
+                const val = searchInput.value;
+                if (!val || val.trim().length === 0) {
+                    resumePolling();
+                }
+                // If user left text in search, keep paused — they may come back
+            });
+
+            // Also pause on inspectNode (ontology clicks)
+            const origInspectNode = inspectNode;
+            inspectNode = function(id) {
+                pausePolling();
+                setTimeout(resumePolling, 10000); // resume after 10s
+                origInspectNode(id);
+            };
 
             // Close search when clicking outside
             document.addEventListener('click', function(e) {
