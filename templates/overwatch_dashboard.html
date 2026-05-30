@@ -6,6 +6,8 @@
     <title>Battle Buddy // OVERWATCH</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
         
@@ -70,22 +72,60 @@
             border-top-color: #00B4D8;
         }
         
-        .map-container {
-            background: linear-gradient(45deg, #0f1f38, #1a2a4a);
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .map-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
+        #map {
             height: 100%;
-            background:
-                radial-gradient(circle at 30% 40%, rgba(0, 180, 216, 0.15) 0%, transparent 50%),
-                radial-gradient(circle at 70% 70%, rgba(255, 77, 77, 0.1) 0%, transparent 60%);
-            pointer-events: none;
+            width: 100%;
+            border-radius: 8px;
+        }
+
+        /* Dark Leaflet tile adjustments */
+        .leaflet-container {
+            background: #0f1f38;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        /* Remove default Leaflet attribution styling for tactical look */
+        .leaflet-control-attribution {
+            background: rgba(10, 20, 40, 0.85) !important;
+            color: #4a5568 !important;
+            font-size: 9px !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            padding: 2px 6px !important;
+            border-radius: 4px !important;
+            border: 1px solid #1E3A5F !important;
+        }
+        .leaflet-control-attribution a {
+            color: #00B4D8 !important;
+        }
+
+        /* Tactical zoom controls */
+        .leaflet-control-zoom a {
+            background: rgba(10, 20, 40, 0.9) !important;
+            color: #00B4D8 !important;
+            border-color: #1E3A5F !important;
+        }
+
+        /* Dark popup */
+        .leaflet-popup-content-wrapper {
+            background: #13213A !important;
+            color: #F0F4F8 !important;
+            border: 1px solid #00B4D8 !important;
+            border-radius: 6px !important;
+            font-family: 'Inter', system-ui, sans-serif !important;
+            font-size: 12px !important;
+        }
+        .leaflet-popup-tip {
+            background: #13213A !important;
+        }
+
+        /* Severity pulse animation for markers */
+        @keyframes marker-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.7); }
+            100% { box-shadow: 0 0 0 12px rgba(255, 77, 77, 0); }
+        }
+        .marker-critical {
+            animation: marker-pulse 2s infinite;
+            border-radius: 50%;
         }
         
         .ontology-tree ul {
@@ -210,24 +250,18 @@
         <!-- CENTER: Map -->
         <div class="flex-1 flex flex-col gap-4">
             <div class="flex-1 panel map-container relative" style="min-height: 420px;">
-                <div class="absolute top-4 left-4 bg-black/70 text-xs mono px-3 py-2 rounded border border-cyan-500/50 z-10">
+                <div class="absolute top-4 left-4 bg-black/70 text-xs mono px-3 py-2 rounded border border-cyan-500/50 z-[1000]">
                     <div class="flex items-center gap-2">
                         <span class="text-cyan-400">&#x2022;</span>
-                        <span>DALLAS METRO - LIVE FEED</span>
+                        <span>AUSTIN METRO - LIVE FEED</span>
                     </div>
-                    <div id="map-coords" class="text-slate-400 text-[10px] mt-1">32.8&#176;N  96.8&#176;W &#x2022; <span id="map-time">--:--:--Z</span></div>
+                    <div id="map-coords" class="text-slate-400 text-[10px] mt-1">30.27&#176;N  97.74&#176;W &#x2022; <span id="map-time">--:--:--Z</span></div>
                 </div>
                 
-                <!-- Map placeholder -->
-                <div class="absolute inset-0 flex items-center justify-center text-slate-600 text-8xl font-light mono select-none">
-                    MAP
-                </div>
-                <div class="map-overlay"></div>
+                <!-- Real Leaflet map -->
+                <div id="map"></div>
                 
-                <!-- Incident markers (populated dynamically) -->
-                <div id="map-markers"></div>
-                
-                <div id="units-deployed" class="absolute bottom-4 right-4 bg-black/80 text-[10px] mono p-3 rounded border border-slate-600 leading-none">
+                <div id="units-deployed" class="absolute bottom-4 right-4 bg-black/80 text-[10px] mono p-3 rounded border border-slate-600 z-[1000]">
                     <div class="text-emerald-400">-- UNITS DEPLOYED</div>
                     <div class="text-slate-400">Loading talkgroups...</div>
                 </div>
@@ -361,7 +395,7 @@
         // =====================================================================
 
         async function fetchStats() {
-            const data = await apiFetch('/api/kg/stats', 'Failed to load stats');
+            const data = await apiFetch('api/kg/stats', 'Failed to load stats');
             if (data && !data.error) {
                 cachedStats = data;
                 renderStats(data);
@@ -372,7 +406,7 @@
         }
 
         async function fetchNodes() {
-            const data = await apiFetch('/api/kg/nodes', 'Failed to load nodes');
+            const data = await apiFetch('api/kg/nodes', 'Failed to load nodes');
             if (data && !data.error) {
                 cachedNodes = data.nodes;
                 renderOntology(data.nodes, data.count);
@@ -382,7 +416,7 @@
         }
 
         async function fetchIncidents() {
-            const data = await apiFetch('/api/kg/incidents', 'Failed to load incidents');
+            const data = await apiFetch('api/kg/incidents', 'Failed to load incidents');
             if (data && !data.error) {
                 cachedIncidents = data.incidents;
                 renderIncidents(data.incidents, data.count);
@@ -396,7 +430,7 @@
         }
 
         async function fetchRelationships() {
-            const data = await apiFetch('/api/kg/relationships', 'Failed to load relationships');
+            const data = await apiFetch('api/kg/relationships', 'Failed to load relationships');
             if (data && !data.error) {
                 cachedRelationships = data.relationships;
                 renderRelationships(data.relationships, data.count);
@@ -408,7 +442,7 @@
                 hideSearchResults();
                 return;
             }
-            const data = await apiFetch(`/api/kg/search?q=${encodeURIComponent(query.trim())}`, 'Search failed');
+            const data = await apiFetch(`api/kg/search?q=${encodeURIComponent(query.trim())}`, 'Search failed');
             if (data && !data.error) {
                 renderSearchResults(data.results, data.query);
             } else {
@@ -633,51 +667,111 @@
             barContainer.innerHTML = markers;
         }
 
+        // ---- Leaflet map state ----
+        let overwatchMap = null;
+        let markersLayer = null;
+
+        function initMap() {
+            if (overwatchMap) return; // already initialized
+
+            const mapEl = document.getElementById('map');
+            if (!mapEl) return;
+
+            overwatchMap = L.map('map', {
+                center: [30.2672, -97.7431],
+                zoom: 12,
+                zoomControl: true,
+                attributionControl: true,
+                preferCanvas: true
+            });
+
+            // CartoDB dark tiles — free, no API key, tactical aesthetic
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }).addTo(overwatchMap);
+
+            // Layer group for incident markers
+            markersLayer = L.layerGroup().addTo(overwatchMap);
+
+            // Update coords display on map move
+            overwatchMap.on('moveend', function() {
+                const center = overwatchMap.getCenter();
+                document.getElementById('map-coords').innerHTML =
+                    center.lat.toFixed(4) + '&#176;N  ' + Math.abs(center.lng).toFixed(4) + '&#176;W &#x2022; ' +
+                    '<span id="map-time">' + new Date().toISOString().substr(11, 8) + 'Z</span>';
+            });
+
+            console.log('[Overwatch] Leaflet map initialized — Austin, TX');
+        }
+
         function renderMapMarkers(incidents) {
-            const container = document.getElementById('map-markers');
-            
-            if (!incidents || incidents.length === 0) {
-                container.innerHTML = '';
-                return;
+            if (!overwatchMap) initMap();
+            if (!markersLayer) return;
+
+            // Clear old markers
+            markersLayer.clearLayers();
+
+            if (!incidents || incidents.length === 0) return;
+
+            // Severity → color mapping
+            function severityColor(severity) {
+                const s = parseInt(severity) || 0;
+                if (s >= 6) return '#ff0000';  // critical — red
+                if (s >= 5) return '#ff4444';  // high — bright red
+                if (s >= 4) return '#ff8c00';  // elevated — orange
+                if (s >= 3) return '#ffd700';  // moderate — gold
+                if (s >= 2) return '#00b4d8';  // low — cyan
+                return '#888888';              // unknown — grey
             }
 
-            // Position markers pseudo-randomly but deterministically based on index
-            const positions = [
-                {top: '35%', left: '42%'},
-                {top: '55%', left: '65%'},
-                {top: '25%', left: '30%'},
-                {top: '65%', left: '45%'},
-                {top: '45%', left: '75%'},
-                {top: '30%', left: '55%'},
-            ];
+            incidents.forEach(function(inc) {
+                // Use real lat/lon if available
+                const lat = parseFloat(inc.lat);
+                const lon = parseFloat(inc.lon);
 
-            let html = '';
-            incidents.slice(0, 6).forEach((inc, idx) => {
-                const pos = positions[idx % positions.length];
-                const itype = (inc.itype || inc.type || inc.label || '').toLowerCase();
-                let iconClass = 'fa-bullseye';
-                let colorClass = 'bg-red-500/80 hover:bg-red-500';
-                
-                if (itype.includes('pursuit') || itype.includes('vehicle') || itype.includes('car')) {
-                    iconClass = 'fa-car';
-                    colorClass = 'bg-amber-500/80 hover:bg-amber-500';
-                } else if (itype.includes('fire')) {
-                    iconClass = 'fa-fire';
-                    colorClass = 'bg-orange-500/80 hover:bg-orange-500';
-                } else if (itype.includes('medical') || itype.includes('injury')) {
-                    iconClass = 'fa-plus';
-                    colorClass = 'bg-pink-500/80 hover:bg-pink-500';
+                if (isNaN(lat) || isNaN(lon)) return; // skip ungeolocated incidents
+
+                const severity = parseInt(inc.severity) || 0;
+                const color = severityColor(severity);
+                const itype = inc.itype || inc.type || 'Incident';
+                const desc = inc.description || '';
+                const status = inc.status || 'unknown';
+                const location = inc.location || '';
+
+                // Circle marker sized by severity
+                const radius = Math.max(8, Math.min(20, 6 + severity * 2));
+
+                const marker = L.circleMarker([lat, lon], {
+                    radius: radius,
+                    fillColor: color,
+                    color: '#ffffff',
+                    weight: 1.5,
+                    opacity: 0.9,
+                    fillOpacity: 0.7
+                }).addTo(markersLayer);
+
+                // Popup with incident details
+                const popupHtml =
+                    '<div style="font-family:Inter,sans-serif;font-size:12px;">' +
+                    '<div style="color:' + color + ';font-weight:600;margin-bottom:4px;">' +
+                    escapeHtml(itype) + '</div>' +
+                    (desc ? '<div style="color:#94a3b8;margin-bottom:4px;">' + escapeHtml(desc.substring(0, 120)) + '</div>' : '') +
+                    (location ? '<div style="color:#64748b;font-size:10px;margin-bottom:2px;">' + escapeHtml(location) + '</div>' : '') +
+                    '<div style="display:flex;gap:8px;margin-top:4px;font-size:10px;">' +
+                    '<span style="background:' + color + '22;color:' + color + ';padding:1px 6px;border-radius:3px;">Sev ' + severity + '</span>' +
+                    '<span style="color:#64748b;">' + escapeHtml(status) + '</span>' +
+                    '</div></div>';
+
+                marker.bindPopup(popupHtml);
+
+                // Critical markers get pulse class
+                if (severity >= 5) {
+                    const icon = marker.getElement();
+                    if (icon) icon.classList.add('marker-critical');
                 }
-
-                html += `
-                <div onclick="selectIncident('${escapeHtml(inc.id)}')" 
-                     class="absolute ${colorClass} w-6 h-6 rounded-full flex items-center justify-center cursor-pointer border border-white shadow-xl transition-transform hover:scale-125"
-                     style="top:${pos.top}; left:${pos.left};"
-                     title="${escapeHtml(inc.itype || inc.type || 'Incident')} - ${escapeHtml(inc.location || '')}">
-                    <i class="fas ${iconClass} text-white text-xs"></i>
-                </div>`;
             });
-            container.innerHTML = html;
         }
 
         function renderRelationships(relationships, count) {
@@ -863,6 +957,9 @@
             
             // Start clock immediately (doesn't depend on API)
             updateClock();
+
+            // Initialize Leaflet map (doesn't depend on API data)
+            initMap();
 
             // Show initial loading states are already in HTML
             
